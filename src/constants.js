@@ -1,1 +1,1 @@
-export const APP_NAME = "Texas Hold'em";
+export const APP_NAME = "TEXAS HOLD'EM SCORE";

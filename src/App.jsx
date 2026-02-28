@@ -2072,7 +2072,7 @@ export default function App() {
             </div>
             )}
             <p className="mt-2 text-xs text-slate-500">
-              第一个进入房间的玩家默认为房主；房主可修改所有玩家的买入/最终积分，并有权限结算本局。
+              房主可修改所有玩家的买入/最终积分和积分换算，并有权限结算本局。
             </p>
 
           </div>
@@ -2199,7 +2199,7 @@ export default function App() {
                 key={p.player_id}
                 className={`rounded-2xl border bg-white/85 p-3.5 shadow-sm sm:p-4 ${
                   mine ? 'border-sky-300 ring-2 ring-sky-100' : 'border-white/70'
-                } ${showMineOnly ? '' : 'min-w-[min(74vw,336px)] shrink-0 sm:min-w-[288px] sm:max-w-[336px]'}`}
+                } ${showMineOnly ? '' : 'min-w-[min(69vw,320px)] shrink-0 sm:min-w-[272px] sm:max-w-[320px]'}`}
               >
                 <div className="mb-2.5 flex items-center gap-1.5 break-all text-base font-semibold text-slate-900">
                   {p.nickname}
@@ -2340,9 +2340,6 @@ export default function App() {
         )}
 
         <h3 className="mt-5 text-lg font-semibold text-ink">转账建议</h3>
-        <p className="mt-1 text-xs text-slate-500">
-          当前换算：2000 积分 = {toRmb(rmbPer2000)}
-        </p>
         <ul className="mt-2 space-y-2.5 text-sm text-slate-700">
           {!transfers.length && (
             <li className="rounded-2xl border border-white/70 bg-white/70 px-3.5 py-3 text-slate-500 backdrop-blur-md">

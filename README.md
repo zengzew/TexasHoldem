@@ -1,4 +1,4 @@
-# Texas Hold'em v1
+# TEXAS HOLD'EM SCORE v1
 
 React + Supabase 的德州扑克聚会积分系统（Web）。
 
@@ -71,7 +71,16 @@ npm run dev
 - [`src/utils/game.js`](/Users/zengze/Documents/New%20project/src/utils/game.js)：结算算法与校验
 - [`supabase_schema.sql`](/Users/zengze/Documents/New%20project/supabase_schema.sql)：数据库结构、函数、RLS
 
-## 9. 生产部署（Vercel）
+## 9. 文档导航
+
+- [`docs/DEVELOPMENT.md`](/Users/zengze/Documents/New%20project/docs/DEVELOPMENT.md)：开发流程与模块说明
+- [`docs/ARCHITECTURE.md`](/Users/zengze/Documents/New%20project/docs/ARCHITECTURE.md)：系统架构与数据流
+- [`docs/DATABASE.md`](/Users/zengze/Documents/New%20project/docs/DATABASE.md)：表结构、RLS、函数与排错
+- [`docs/DEPLOYMENT.md`](/Users/zengze/Documents/New%20project/docs/DEPLOYMENT.md)：Vercel 与 Supabase 部署
+- [`docs/OPERATIONS.md`](/Users/zengze/Documents/New%20project/docs/OPERATIONS.md)：日常运维检查清单
+- [`docs/CHANGELOG.md`](/Users/zengze/Documents/New%20project/docs/CHANGELOG.md)：版本变更记录
+
+## 10. 生产部署（Vercel）
 
 ```bash
 npx vercel --prod --yes
@@ -82,7 +91,7 @@ npx vercel --prod --yes
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-## 10. v1 备注
+## 11. v1 备注
 
 - 当前版本已移除 `admin` 相关功能与 SQL
 - 权限以房主机制 + RLS 为主
