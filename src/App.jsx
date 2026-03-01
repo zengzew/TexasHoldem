@@ -148,7 +148,6 @@ export default function App() {
   const TAB_ORDER = { room: 0, leaderboard: 1, history: 2 };
   const tabSlideClass =
     TAB_ORDER[activeTab] >= TAB_ORDER[prevTabRef.current] ? 'tab-content-slide-left' : 'tab-content-slide-right';
-  const sortTabOrder = { profit: 0, roi: 1, efficiency: 2 };
 
   function showNotice(message, type = 'error') {
     setNoticeType(type);
@@ -1920,7 +1919,6 @@ export default function App() {
         </div>
 
         <div className="tab-scroll segmented-shell relative mt-3 overflow-x-auto p-1">
-          <span className="tab-underline-indicator" style={{ transform: `translateX(${TAB_ORDER[activeTab] * 100}%)` }} />
           <div className="relative z-[1] grid min-w-full grid-cols-3 gap-2">
             <button
               className={`relative rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
@@ -2385,7 +2383,6 @@ export default function App() {
           </div>
         </div>
         <div className="tab-scroll segmented-shell relative mt-3 min-h-[3.3rem] overflow-x-auto p-1">
-          <span className="tab-underline-indicator" style={{ transform: `translateX(${sortTabOrder[leaderboardView] * 100}%)` }} />
           <div className="relative z-[1] grid min-w-full grid-cols-3 gap-2">
           <button
             className={`${leaderboardView === 'profit' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] w-full whitespace-nowrap`}
