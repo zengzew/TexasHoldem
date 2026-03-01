@@ -148,6 +148,7 @@ export default function App() {
   const TAB_ORDER = { room: 0, leaderboard: 1, history: 2 };
   const tabSlideClass =
     TAB_ORDER[activeTab] >= TAB_ORDER[prevTabRef.current] ? 'tab-content-slide-left' : 'tab-content-slide-right';
+  const sortTabOrder = { profit: 0, roi: 1, efficiency: 2 };
 
   function showNotice(message, type = 'error') {
     setNoticeType(type);
@@ -1186,7 +1187,7 @@ export default function App() {
     const editable = localMockMode || playerId === user?.id || (ownerFeatureEnabled && roomOwnerId === user?.id);
     if (!editable) return;
 
-    const current = toNonNegativeChipInt(buyInDrafts[playerId] ?? player.buy_in ?? 0);
+    const current = toNonNegativeChipInt(buyInDrafts[playerId] ?? 0);
     if (!Number.isFinite(current)) return;
     const nextValue = Math.max(0, Math.round(current + delta * BUY_IN_STEP));
     setBuyInDrafts((prev) => ({ ...prev, [playerId]: String(nextValue) }));
@@ -1207,14 +1208,10 @@ export default function App() {
 
   function mergePlayersWithDrafts(basePlayers) {
     return [...basePlayers].map((p) => {
-      const buyDraft = buyInDrafts[p.player_id];
       const finalDraft = finalChipsDrafts[p.player_id];
       return {
         ...p,
-        buy_in:
-          buyDraft == null || buyDraft === ''
-            ? toNonNegativeChipInt(p.buy_in)
-            : toNonNegativeChipInt(buyDraft),
+        buy_in: toNonNegativeChipInt(p.buy_in),
         final_chips:
           finalDraft == null
             ? p.final_chips == null
@@ -1236,7 +1233,11 @@ export default function App() {
     if (!canEditBuyIn && !canEditFinal) return;
 
     const merged = mergePlayersWithDrafts([player])[0];
-    const nextBuyIn = canEditBuyIn ? toNonNegativeChipInt(merged.buy_in) : toNonNegativeChipInt(player.buy_in);
+    const topUpDraft = buyInDrafts[playerId];
+    const topUpAmount =
+      canEditBuyIn && topUpDraft != null && topUpDraft !== '' ? toNonNegativeChipInt(topUpDraft) : null;
+    const nextBuyIn =
+      topUpAmount == null ? toNonNegativeChipInt(player.buy_in) : toNonNegativeChipInt(player.buy_in) + topUpAmount;
     const nextFinal = canEditFinal
       ? merged.final_chips == null
         ? null
@@ -1245,6 +1246,10 @@ export default function App() {
         ? null
         : toNonNegativeChipInt(player.final_chips);
 
+    if (topUpAmount != null && (!Number.isFinite(topUpAmount) || topUpAmount < 0)) {
+      showNotice('本次买入金额不合法', 'error');
+      return;
+    }
     if (!Number.isFinite(nextBuyIn) || nextBuyIn < 0) {
       showNotice('买入金额不合法', 'error');
       return;
@@ -1260,7 +1265,7 @@ export default function App() {
           item.player_id === playerId
             ? {
                 ...item,
-                buy_in: canEditBuyIn ? nextBuyIn : item.buy_in,
+                buy_in: topUpAmount == null ? item.buy_in : nextBuyIn,
                 final_chips: canEditFinal ? nextFinal : item.final_chips,
               }
             : item
@@ -1271,7 +1276,7 @@ export default function App() {
     }
 
     const updatePayload = {};
-    if (canEditBuyIn) {
+    if (topUpAmount != null) {
       updatePayload.buy_in = nextBuyIn;
     }
     if (canEditFinal) {
@@ -1894,7 +1899,7 @@ export default function App() {
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 w-full">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Texas Hold'em Score</p>
-            <h1 className="mt-1.5 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{APP_NAME}</h1>
+            <h1 className="app-title mt-1.5 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{APP_NAME}</h1>
             <div className="mt-1 flex items-center justify-between gap-3">
               <p className={`text-sm text-slate-600 transition ${welcomePulse ? 'welcome-pulse' : ''}`}>
                 欢迎，{profileName || user.email}
@@ -1914,10 +1919,11 @@ export default function App() {
           </div>
         </div>
 
-        <div className="tab-scroll segmented-shell mt-3 overflow-x-auto p-1">
-          <div className="grid min-w-full grid-cols-3 gap-2">
+        <div className="tab-scroll segmented-shell relative mt-3 overflow-x-auto p-1">
+          <span className="tab-underline-indicator" style={{ transform: `translateX(${TAB_ORDER[activeTab] * 100}%)` }} />
+          <div className="relative z-[1] grid min-w-full grid-cols-3 gap-2">
             <button
-              className={`rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
+              className={`relative rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
                 activeTab === 'room'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -1932,7 +1938,7 @@ export default function App() {
               当前房间
             </button>
             <button
-              className={`rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
+              className={`relative rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
                 activeTab === 'leaderboard'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -1947,7 +1953,7 @@ export default function App() {
               积分榜
             </button>
             <button
-              className={`rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
+              className={`relative rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
                 activeTab === 'history'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -1966,19 +1972,8 @@ export default function App() {
 
         {activeTab === 'room' && (
           <div className={tabSlideClass}>
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:max-w-sm">
-              <div className="rounded-2xl border border-white/70 bg-white/80 px-3 py-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">已结算对局</p>
-                <p className="mt-1 text-xl font-semibold text-slate-900">{globalStats.settledSessions}</p>
-              </div>
-              <div className="rounded-2xl border border-white/70 bg-white/80 px-3 py-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">总房间数</p>
-                <p className="mt-1 text-xl font-semibold text-slate-900">{globalStats.rooms}</p>
-              </div>
-            </div>
-
             {!hasJoinedRoom && (
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
               <label className="block">
                 <span className="field-label">房间号</span>
                 <input
@@ -2175,7 +2170,7 @@ export default function App() {
             className={
               showMineOnly
                 ? 'grid grid-cols-1 gap-2.5'
-                : 'tab-scroll flex gap-2.5 overflow-x-auto pb-1 [scrollbar-width:thin]'
+                : 'tab-scroll flex justify-center gap-2.5 overflow-x-auto pb-1 [scrollbar-width:thin]'
             }
           >
             {visiblePlayers.map((p) => {
@@ -2186,11 +2181,11 @@ export default function App() {
             const canConfirm = canEditBuyIn || canEditFinal;
             const buyDraft = buyInDrafts[p.player_id];
             const finalDraft = finalChipsDrafts[p.player_id];
-            const displayBuyIn = buyDraft ?? String(toNonNegativeChipInt(p.buy_in));
+            const displayBuyIn = buyDraft ?? '';
             const displayFinal = finalDraft ?? (p.final_chips == null ? '' : String(toNonNegativeChipInt(p.final_chips)));
-            const hasPendingDraft = buyDraft != null || finalDraft != null;
+            const hasPendingFinalDraft = finalDraft != null;
             const netValue =
-              hasPendingDraft || p.final_chips == null
+              hasPendingFinalDraft || p.final_chips == null
                 ? null
                 : Math.round(Number(p.final_chips || 0) - Number(p.buy_in || 0));
             const netClass = netValue > 0 ? 'text-emerald-600' : netValue < 0 ? 'text-rose-600' : 'text-slate-500';
@@ -2199,7 +2194,7 @@ export default function App() {
                 key={p.player_id}
                 className={`rounded-2xl border bg-white/85 p-3.5 shadow-sm sm:p-4 ${
                   mine ? 'border-sky-300 ring-2 ring-sky-100' : 'border-white/70'
-                } ${showMineOnly ? '' : 'min-w-[min(69vw,320px)] shrink-0 sm:min-w-[272px] sm:max-w-[320px]'}`}
+                } ${showMineOnly ? '' : 'min-w-[min(62vw,288px)] shrink-0 sm:min-w-[245px] sm:max-w-[288px]'}`}
               >
                 <div className="mb-2.5 flex items-center gap-1.5 break-all text-base font-semibold text-slate-900">
                   {p.nickname}
@@ -2210,9 +2205,12 @@ export default function App() {
                   )}
                   {mine ? '（我）' : ''}
                 </div>
+                <p className="mb-2 text-xs font-medium text-slate-500">
+                  累计总买入：<span className="font-semibold text-slate-700">{toChips(p.buy_in)}</span> 积分
+                </p>
 
                 <label className="block">
-                  <span className="field-label">买入</span>
+                  <span className="field-label">本次买入</span>
                   <div className="mt-1 flex items-center gap-2">
                     <input
                       className="field-input no-spin min-w-0 flex-1"
@@ -2220,6 +2218,7 @@ export default function App() {
                       inputMode="numeric"
                       autoComplete="off"
                       value={displayBuyIn}
+                      placeholder="输入本次买入"
                       disabled={!canEditBuyIn}
                       onChange={(e) => {
                         if (!canEditBuyIn) return;
@@ -2301,7 +2300,7 @@ export default function App() {
                 <div className={`mt-3 text-sm font-semibold ${netClass}`}>
                   净输赢：
                   {netValue == null ? (
-                    hasPendingDraft ? (
+                    hasPendingFinalDraft ? (
                       '待确认'
                     ) : (
                       '-'
@@ -2320,7 +2319,7 @@ export default function App() {
         </div>
 
         <div className="mt-3 rounded-2xl border border-slate-200 bg-white/90 p-3.5 text-sm text-slate-700 sm:p-4">
-          总买入：<b>{toChips(totalBuyIn)}</b> | 总最终积分：<b>{toChips(totalFinal)}</b>
+          总买入：<b className="num">{toChips(totalBuyIn)}</b> | 总最终积分：<b className="num">{toChips(totalFinal)}</b>
         </div>
 
         {hasJoinedRoom && amRoomOwner && (
@@ -2385,8 +2384,9 @@ export default function App() {
             <span className="font-semibold text-slate-900">{globalStats.settledSessions}</span>
           </div>
         </div>
-        <div className="tab-scroll segmented-shell mt-3 min-h-[3.3rem] overflow-x-auto p-1">
-          <div className="grid min-w-full grid-cols-3 gap-2">
+        <div className="tab-scroll segmented-shell relative mt-3 min-h-[3.3rem] overflow-x-auto p-1">
+          <span className="tab-underline-indicator" style={{ transform: `translateX(${sortTabOrder[leaderboardView] * 100}%)` }} />
+          <div className="relative z-[1] grid min-w-full grid-cols-3 gap-2">
           <button
             className={`${leaderboardView === 'profit' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] w-full whitespace-nowrap`}
             onClick={() => setLeaderboardView('profit')}
@@ -2411,7 +2411,7 @@ export default function App() {
           {!visibleLeaderboard.length && (
             <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">暂无数据</div>
           )}
-          {visibleLeaderboard.map((p) => {
+          {visibleLeaderboard.map((p, idx) => {
             const mine = p.playerId === user.id;
             const expanded = expandedLeaderboardId === p.playerId;
             const metricValue =
@@ -2429,9 +2429,10 @@ export default function App() {
             return (
               <article
                 key={p.playerId}
-                className={`rounded-2xl border bg-white/90 p-3.5 ${
+                className={`stagger-item rounded-2xl border bg-white/90 p-3.5 ${
                   mine ? 'border-sky-300 ring-2 ring-sky-100' : 'border-slate-200'
                 }`}
+                style={{ animationDelay: `${Math.min(idx, 8) * 45}ms` }}
               >
                 <button
                   type="button"
@@ -2525,12 +2526,13 @@ export default function App() {
           {!historySessions.length && (
             <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">暂无历史对局</div>
           )}
-          {pagedHistorySessions.map((session) => {
+          {pagedHistorySessions.map((session, idx) => {
             const expanded = expandedHistoryId === session.id;
             return (
               <article
                 key={session.id}
-                className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white/95 to-slate-50/80 p-2.5 shadow-sm"
+                className="stagger-item rounded-2xl border border-slate-200 bg-gradient-to-br from-white/95 to-slate-50/80 p-2.5 shadow-sm"
+                style={{ animationDelay: `${Math.min(idx, 8) * 45}ms` }}
               >
                 <button
                   type="button"
@@ -2544,12 +2546,12 @@ export default function App() {
                           房间 {session.id}
                         </span>
                         {session.status === 'settled' && (
-                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                          <span className="status-settled rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                             已结算
                           </span>
                         )}
                         {session.status !== 'settled' && (
-                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                          <span className="status-active rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
                             进行中
                           </span>
                         )}
@@ -2672,7 +2674,7 @@ export default function App() {
                 <ArrowLeftIcon />
               </button>
               <span className="text-center text-slate-600">
-                第 <b>{historyPage}</b> / <b>{historyPageCount}</b> 页
+                <b>{historyPage}</b>/<b>{historyPageCount}</b>
               </span>
               <button
                 className="btn-secondary inline-flex min-h-[44px] min-w-[88px] items-center justify-center gap-1.5 px-3 py-2 text-xs"
