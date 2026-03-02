@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { hasSupabaseConfig, supabase } from './supabase';
-import { APP_NAME, APP_SUBTITLE } from './constants';
+import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
 import ownerCrownIcon from './assets/owner-crown.svg';
@@ -63,9 +63,9 @@ function AccountAvatarIcon() {
   );
 }
 
-function RefreshIcon() {
+function RefreshIcon({ className = 'h-4 w-4' }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-4 w-4">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className={className}>
       <path d="M20 12a8 8 0 1 1-2.34-5.66" />
       <path d="M20 4v6h-6" />
     </svg>
@@ -201,6 +201,7 @@ export default function App() {
   const [isDissolving, setIsDissolving] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [leaderboardCollapsedCount, setLeaderboardCollapsedCount] = useState(5);
+  const [isRefreshingOpenRooms, setIsRefreshingOpenRooms] = useState(false);
 
   const roomChannelRef = useRef(null);
   const settleInFlightRef = useRef(false);
@@ -2038,7 +2039,7 @@ export default function App() {
         setLeaderboardCollapsedCount(5);
         return;
       }
-      setLeaderboardCollapsedCount(height >= 900 ? 5 : 4);
+      setLeaderboardCollapsedCount(height >= 900 ? 6 : 5);
     }
     updateCollapsedCount();
     window.addEventListener('resize', updateCollapsedCount);
@@ -2107,7 +2108,6 @@ export default function App() {
     return (
       <main className="safe-area-bottom w-full px-3 py-4 sm:px-4 md:mx-auto md:max-w-6xl md:py-8">
         <section className="glass-card rounded-3xl p-4 sm:mx-auto sm:max-w-md sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{APP_SUBTITLE}</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">{APP_NAME}</h1>
 
           <label className="mt-5 block">
@@ -2191,10 +2191,9 @@ export default function App() {
   const visiblePlayers = showMineOnly ? sortedPlayers.filter((p) => p.player_id === user.id) : sortedPlayers;
   return (
     <main className="safe-area-bottom w-full px-3 py-3 sm:px-4 md:mx-auto md:max-w-6xl md:py-8">
-      <section className="glass-card relative rounded-3xl p-4 sm:p-5">
+      <section className="glass-card relative rounded-3xl px-4 py-2.5 sm:px-5 sm:py-3.5">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 w-full">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{APP_SUBTITLE}</p>
             <h1 className="app-title mt-1.5 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{APP_NAME}</h1>
             <div className="mt-1 flex items-center justify-between gap-3">
               <p className={`text-sm text-slate-600 transition ${welcomePulse ? 'welcome-pulse' : ''}`}>
@@ -2313,17 +2312,21 @@ export default function App() {
                 <p className="text-sm font-semibold text-amber-800">未结算房间</p>
                 <button
                   className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-amber-200 bg-white/80 px-3 py-1.5 text-amber-700 transition hover:bg-white"
+                  disabled={isRefreshingOpenRooms}
                   onClick={async () => {
                     try {
+                      setIsRefreshingOpenRooms(true);
                       await loadOpenRooms();
                     } catch (err) {
                       showNotice(err.message, 'error');
+                    } finally {
+                      setIsRefreshingOpenRooms(false);
                     }
                   }}
                   aria-label="刷新未结算房间"
                   title="刷新"
                 >
-                  <RefreshIcon />
+                  <RefreshIcon className={`h-4 w-4 ${isRefreshingOpenRooms ? 'animate-spin' : ''}`} />
                 </button>
               </div>
               <div className="mt-2 max-h-56 space-y-2 overflow-y-auto pr-1">

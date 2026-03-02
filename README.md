@@ -1,4 +1,4 @@
-# TEXAS HOLD'EM SCORE v2.1.1
+# TEXAS HOLD'EM SCORE v2.1.2
 
 React + Supabase 的德州扑克聚会积分系统（Web）。
 
@@ -14,7 +14,6 @@ React + Supabase 的德州扑克聚会积分系统（Web）。
 - 日期范围筛选（积分榜弹出式 Date Picker，默认当年 1 月 1 日到今天）
 - 积分换算（2000 积分 = X RMB）
 - 移动端优化与玻璃拟态 UI
-- 品牌副标题常量化：`欢迎来到 永和阳光苑`
 - 历史积分榜统计全量历史对局；历史记录仅显示当前用户参与过的对局
 
 ## 2. 技术栈
@@ -95,7 +94,7 @@ npx vercel --prod --yes
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-## 11. v2.1.1 备注
+## 11. v2.1.2 备注
 
 - 当前版本已移除 `admin` 相关功能与 SQL
 - 权限以房主机制 + RLS 为主
