@@ -1,10 +1,11 @@
-# 部署文档（Vercel + Supabase）
+# 部署文档（Vercel + Supabase, v2.1.0）
 
 ## 1. 前置准备
 
 - GitHub 仓库已存在
 - Supabase 项目已创建并执行 `supabase_schema.sql`
 - Vercel 项目已绑定仓库（或本地 CLI 直接部署）
+- Node.js 推荐版本：`24.x`
 
 ## 2. 环境变量
 

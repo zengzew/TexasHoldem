@@ -13,8 +13,16 @@ create extension if not exists pgcrypto with schema extensions;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   nickname text not null,
+  total_games integer not null default 0,
+  winning_games integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+alter table public.profiles
+add column if not exists total_games integer not null default 0;
+
+alter table public.profiles
+add column if not exists winning_games integer not null default 0;
 
 create table if not exists public.sessions (
   id text primary key,
@@ -135,6 +143,60 @@ create trigger trg_touch_room_players_updated_at
 before update on public.room_players
 for each row execute procedure public.touch_room_players_updated_at();
 
+create or replace function public.refresh_profile_stats(target_player_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_total integer := 0;
+  v_winning integer := 0;
+begin
+  select
+    count(*)::integer,
+    count(*) filter (where sp.net_result > 0)::integer
+  into v_total, v_winning
+  from public.session_players sp
+  where sp.player_id = target_player_id;
+
+  update public.profiles p
+  set
+    total_games = coalesce(v_total, 0),
+    winning_games = coalesce(v_winning, 0)
+  where p.id = target_player_id;
+end;
+$$;
+
+create or replace function public.trg_refresh_profile_stats()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'INSERT' then
+    perform public.refresh_profile_stats(new.player_id);
+    return new;
+  elsif tg_op = 'UPDATE' then
+    perform public.refresh_profile_stats(new.player_id);
+    if old.player_id is distinct from new.player_id then
+      perform public.refresh_profile_stats(old.player_id);
+    end if;
+    return new;
+  elsif tg_op = 'DELETE' then
+    perform public.refresh_profile_stats(old.player_id);
+    return old;
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_session_players_refresh_profile_stats on public.session_players;
+create trigger trg_session_players_refresh_profile_stats
+after insert or update or delete on public.session_players
+for each row execute procedure public.trg_refresh_profile_stats();
+
 -- Backfill owner_id for legacy sessions (pick earliest room member by updated_at).
 update public.sessions s
 set owner_id = (
@@ -145,6 +207,26 @@ set owner_id = (
   limit 1
 )
 where s.owner_id is null;
+
+-- Backfill profile counters for existing data.
+update public.profiles p
+set
+  total_games = coalesce(agg.total_games, 0),
+  winning_games = coalesce(agg.winning_games, 0)
+from (
+  select
+    sp.player_id,
+    count(*)::integer as total_games,
+    count(*) filter (where sp.net_result > 0)::integer as winning_games
+  from public.session_players sp
+  group by sp.player_id
+) agg
+where p.id = agg.player_id;
+
+update public.profiles
+set total_games = 0,
+    winning_games = 0
+where id not in (select distinct player_id from public.session_players);
 
 -- ------------------------------------------------------------------
 -- RLS

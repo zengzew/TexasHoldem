@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { hasSupabaseConfig, supabase } from './supabase';
-import { APP_NAME } from './constants';
+import { APP_NAME, APP_SUBTITLE } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
+import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
 import ownerCrownIcon from './assets/owner-crown.svg';
 import chevronDownIcon from './assets/chevron-down.svg';
 import medalGoldIcon from './assets/medal-gold.svg';
@@ -87,7 +88,67 @@ function ArrowRightIcon() {
   );
 }
 
+function WinRateRing({ value = 0 }) {
+  const safe = Math.max(0, Math.min(100, Number(value || 0)));
+  const radius = 17;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - safe / 100);
+
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/72 px-2.5 py-1.5">
+      <svg viewBox="0 0 40 40" className="h-9 w-9" aria-hidden>
+        <circle cx="20" cy="20" r={radius} stroke="rgba(148,163,184,0.25)" strokeWidth="3.5" fill="none" />
+        <circle
+          cx="20"
+          cy="20"
+          r={radius}
+          stroke="url(#win-rate-gradient)"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="win-rate-ring-progress"
+          transform="rotate(-90 20 20)"
+        />
+        <defs>
+          <linearGradient id="win-rate-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#4f46e5" />
+            <stop offset="60%" stopColor="#3b82f6" />
+            <stop offset="100%" stopColor="#22d3ee" />
+          </linearGradient>
+        </defs>
+      </svg>
+      <div className="leading-none">
+        <p className="text-[10px] text-slate-500">胜率</p>
+        <p className="num mt-1 text-xs font-semibold text-slate-800">
+          {safe > 0 ? '+' : ''}
+          {safe.toFixed(1)}%
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function toLocalDateInput(dateLike = new Date()) {
+  const date = dateLike instanceof Date ? dateLike : new Date(dateLike);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function toUtcDateInput(dateLike = new Date()) {
+  const date = dateLike instanceof Date ? dateLike : new Date(dateLike);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
+}
+
 export default function App() {
+  const defaultEndDate = toLocalDateInput(new Date());
+  const defaultStartDate = `${String(new Date().getFullYear())}-01-01`;
   const [user, setUser] = useState(null);
   const [profileName, setProfileName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -123,7 +184,7 @@ export default function App() {
   const [buyInDrafts, setBuyInDrafts] = useState({});
   const [finalChipsDrafts, setFinalChipsDrafts] = useState({});
   const [transfers, setTransfers] = useState([]);
-  const [leaderboard, setLeaderboard] = useState([]);
+  const [leaderboardRows, setLeaderboardRows] = useState([]);
   const [leaderboardView, setLeaderboardView] = useState('profit');
   const [expandedLeaderboardId, setExpandedLeaderboardId] = useState('');
   const [showAllLeaderboard, setShowAllLeaderboard] = useState(false);
@@ -131,6 +192,10 @@ export default function App() {
   const [expandedHistoryId, setExpandedHistoryId] = useState('');
   const [historyPage, setHistoryPage] = useState(1);
   const [globalStats, setGlobalStats] = useState({ settledSessions: 0, rooms: 0 });
+  const [datePreset, setDatePreset] = useState('all');
+  const [customStartDate, setCustomStartDate] = useState(defaultStartDate);
+  const [customEndDate, setCustomEndDate] = useState(defaultEndDate);
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
   const [isSettling, setIsSettling] = useState(false);
   const [dissolveConfirmOpen, setDissolveConfirmOpen] = useState(false);
   const [isDissolving, setIsDissolving] = useState(false);
@@ -146,6 +211,12 @@ export default function App() {
   const HISTORY_PAGE_SIZE = 5;
   const DEFAULT_RMB_PER_2000 = 100;
   const TAB_ORDER = { room: 0, leaderboard: 1, history: 2 };
+  const DATE_PRESETS = [
+    { key: '3m', label: '近3月' },
+    { key: '6m', label: '近半年' },
+    { key: '1y', label: '近一年' },
+    { key: 'all', label: '全部' },
+  ];
   const tabSlideClass =
     TAB_ORDER[activeTab] >= TAB_ORDER[prevTabRef.current] ? 'tab-content-slide-left' : 'tab-content-slide-right';
 
@@ -212,6 +283,103 @@ export default function App() {
     });
   }
 
+  function renderDatePopover() {
+    const rangeText = `${customStartDate || defaultStartDate} ~ ${customEndDate || defaultEndDate}`;
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          className="btn-secondary inline-flex min-h-[44px] w-full items-center justify-center whitespace-nowrap px-3 py-2 text-xs sm:w-auto"
+          onClick={() => setDatePopoverOpen((prev) => !prev)}
+        >
+          {rangeText}
+        </button>
+        {datePopoverOpen && (
+          <>
+            <button
+              className="fixed inset-0 z-40 bg-transparent"
+              onClick={() => setDatePopoverOpen(false)}
+              aria-label="关闭日期筛选"
+            />
+            <div className="date-popover absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(92vw,24rem)] rounded-2xl border border-slate-200/80 bg-white p-3 shadow-xl backdrop-blur-md">
+              <div className="account-popover-arrow" aria-hidden />
+              <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-[96px_1fr]">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-1">
+                  {DATE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                        datePreset === preset.key ? 'btn-primary' : 'btn-secondary'
+                      }`}
+                      onClick={() => {
+                        const nextPreset = preset.key;
+                        setDatePreset(nextPreset);
+                        if (nextPreset !== 'all') {
+                          const range = buildDateRange({ preset: nextPreset, now: new Date() });
+                          const nextStart = range.from ? toUtcDateInput(range.from) : defaultStartDate;
+                          const nextEnd = range.to ? toUtcDateInput(range.to) : defaultEndDate;
+                          setCustomStartDate(nextStart);
+                          setCustomEndDate(nextEnd);
+                        }
+                        setDatePopoverOpen(false);
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  <label className="block">
+                    <span className="field-label">开始日期</span>
+                    <input
+                      type="date"
+                      lang="en-CA"
+                      className="account-input"
+                      value={customStartDate}
+                      onChange={(e) => {
+                        setCustomStartDate(e.target.value);
+                        setDatePreset('all');
+                        setDatePopoverOpen(false);
+                      }}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="field-label">结束日期</span>
+                    <input
+                      type="date"
+                      lang="en-CA"
+                      className="account-input"
+                      value={customEndDate}
+                      onChange={(e) => {
+                        setCustomEndDate(e.target.value);
+                        setDatePreset('all');
+                        setDatePopoverOpen(false);
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  className="btn-secondary px-3 py-2 text-xs"
+                  onClick={() => {
+                    setDatePreset('all');
+                    setCustomStartDate(defaultStartDate);
+                    setCustomEndDate(defaultEndDate);
+                  }}
+                >
+                  重置
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   const activePlayers = localMockMode ? mockPlayers : players;
   const nameById = useMemo(() => new Map(activePlayers.map((p) => [p.player_id, p.nickname])), [activePlayers]);
   const sortedPlayers = useMemo(
@@ -229,29 +397,56 @@ export default function App() {
       }),
     [activePlayers, user?.id, roomOwnerId]
   );
-  const rankedLeaderboard = useMemo(() => {
-    const list = [...leaderboard];
-    if (leaderboardView === 'roi') {
-      list.sort((a, b) => b.roi - a.roi || b.totalProfit - a.totalProfit || b.totalSessions - a.totalSessions);
-    } else if (leaderboardView === 'efficiency') {
-      list.sort((a, b) => b.avgProfitPerSession - a.avgProfitPerSession || b.totalProfit - a.totalProfit);
-    } else {
-      list.sort((a, b) => b.totalProfit - a.totalProfit || b.totalSessions - a.totalSessions);
+  const selectedDateRange = useMemo(
+    () => buildDateRange({ preset: datePreset, customStart: customStartDate, customEnd: customEndDate }),
+    [datePreset, customStartDate, customEndDate]
+  );
+  const filteredLeaderboardRows = useMemo(
+    () => filterRowsByDateRange(leaderboardRows, selectedDateRange),
+    [leaderboardRows, selectedDateRange]
+  );
+  const effectiveLeaderboardRows = useMemo(() => {
+    const isDefaultWindow =
+      datePreset === 'all' &&
+      customStartDate === defaultStartDate &&
+      customEndDate === defaultEndDate;
+    if (isDefaultWindow && filteredLeaderboardRows.length === 0 && leaderboardRows.length > 0) {
+      return leaderboardRows;
     }
-    return list.map((item, index) => ({ ...item, displayRank: index + 1 }));
-  }, [leaderboard, leaderboardView]);
+    return filteredLeaderboardRows;
+  }, [
+    datePreset,
+    customStartDate,
+    customEndDate,
+    defaultStartDate,
+    defaultEndDate,
+    filteredLeaderboardRows,
+    leaderboardRows,
+  ]);
+  const filteredLeaderboardSessionCount = useMemo(
+    () => new Set(effectiveLeaderboardRows.map((row) => row.sessionId)).size,
+    [effectiveLeaderboardRows]
+  );
+  const rankedLeaderboard = useMemo(() => {
+    const aggregated = aggregateLeaderboardRows(effectiveLeaderboardRows);
+    return sortLeaderboardRows(aggregated, leaderboardView);
+  }, [effectiveLeaderboardRows, leaderboardView]);
   const visibleLeaderboard = useMemo(
     () => (showAllLeaderboard ? rankedLeaderboard : rankedLeaderboard.slice(0, 5)),
     [rankedLeaderboard, showAllLeaderboard]
   );
+  const filteredHistorySessions = useMemo(
+    () => historySessions,
+    [historySessions]
+  );
   const historyPageCount = useMemo(
-    () => Math.max(1, Math.ceil(historySessions.length / HISTORY_PAGE_SIZE)),
-    [historySessions.length]
+    () => Math.max(1, Math.ceil(filteredHistorySessions.length / HISTORY_PAGE_SIZE)),
+    [filteredHistorySessions.length]
   );
   const pagedHistorySessions = useMemo(() => {
     const start = (historyPage - 1) * HISTORY_PAGE_SIZE;
-    return historySessions.slice(start, start + HISTORY_PAGE_SIZE);
-  }, [historySessions, historyPage]);
+    return filteredHistorySessions.slice(start, start + HISTORY_PAGE_SIZE);
+  }, [filteredHistorySessions, historyPage]);
 
   function nicknameToEmail(rawNickname) {
     const normalized = normalizeNickname(rawNickname).toLowerCase();
@@ -326,6 +521,14 @@ export default function App() {
     return Math.round(n);
   }
 
+  function toSignedChipIntOrNull(value) {
+    if (value == null) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    if (!/^-?\d+$/.test(text)) return null;
+    return toChipInt(text);
+  }
+
   function toNonNegativeChipInt(value) {
     return Math.max(0, toChipInt(value));
   }
@@ -384,53 +587,59 @@ export default function App() {
   }
 
   async function loadLeaderboard() {
-    const { data: rows, error } = await supabase
+    const { data: rows, error: rowsErr } = await supabase
       .from('session_players')
-      .select('player_id,buy_in,net_result');
+      .select('session_id,player_id,buy_in,net_result')
+      .limit(20000);
+    if (rowsErr) throw rowsErr;
 
-    if (error) throw error;
+    const sessionIds = [...new Set((rows || []).map((row) => row.session_id).filter(Boolean))];
+    if (!sessionIds.length || !(rows || []).length) {
+      setLeaderboardRows([]);
+      return;
+    }
 
-    const ids = [...new Set((rows || []).map((r) => r.player_id))];
+    const { data: sessions, error: sessionsErr } = await supabase
+      .from('sessions')
+      .select('id,created_at,rmb_per_2000')
+      .in('id', sessionIds);
+    if (sessionsErr) throw sessionsErr;
+
+    const sessionMeta = new Map(
+      (sessions || []).map((row) => [
+        row.id,
+        {
+          createdAt: row.created_at,
+          rmbPer2000: Number(row.rmb_per_2000 || DEFAULT_RMB_PER_2000),
+        },
+      ])
+    );
+
+    const playerIds = [...new Set((rows || []).map((row) => row.player_id).filter(Boolean))];
     let names = new Map();
-
-    if (ids.length) {
+    if (playerIds.length) {
       const { data: profiles, error: profileErr } = await supabase
         .from('profiles')
-        .select('id,nickname')
-        .in('id', ids);
+        .select('id,nickname,total_games,winning_games')
+        .in('id', playerIds);
       if (profileErr) throw profileErr;
       names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
     }
 
-    const agg = new Map();
-    (rows || []).forEach((r) => {
-      if (!agg.has(r.player_id)) {
-        agg.set(r.player_id, {
-          playerId: r.player_id,
-          name: names.get(r.player_id) || 'Unknown',
-          totalSessions: 0,
-          totalBuyIn: 0,
-          totalProfit: 0,
-        });
-      }
-
-      const row = agg.get(r.player_id);
-      row.totalSessions += 1;
-      row.totalBuyIn += toNonNegativeChipInt(r.buy_in);
-      row.totalProfit += toChipInt(r.net_result);
+    const mapped = (rows || []).map((row) => {
+      const meta = sessionMeta.get(row.session_id) || {};
+      return {
+        sessionId: row.session_id,
+        playerId: row.player_id,
+        playerName: names.get(row.player_id) || 'Unknown',
+        buyIn: toNonNegativeChipInt(row.buy_in),
+        netResult: toChipInt(row.net_result),
+        createdAt: meta.createdAt || null,
+        rmbPer2000: Number(meta.rmbPer2000 || DEFAULT_RMB_PER_2000),
+      };
     });
 
-    const list = Array.from(agg.values())
-      .map((r) => ({
-        ...r,
-        totalBuyIn: Math.round(r.totalBuyIn),
-        totalProfit: Math.round(r.totalProfit),
-        avgProfitPerSession: r.totalSessions ? Math.round(r.totalProfit / r.totalSessions) : 0,
-        roi: r.totalBuyIn ? Number(((r.totalProfit / r.totalBuyIn) * 100).toFixed(1)) : 0,
-      }))
-      .sort((a, b) => b.totalProfit - a.totalProfit || b.totalSessions - a.totalSessions);
-
-    setLeaderboard(list.map((item, index) => ({ ...item, rank: index + 1 })));
+    setLeaderboardRows(mapped);
   }
 
   async function loadOpenRooms() {
@@ -535,21 +744,41 @@ export default function App() {
   }
 
   async function loadHistorySessions() {
+    const [{ data: roomRows, error: roomErr }, { data: settledRows, error: settledErr }] = await Promise.all([
+      supabase.from('room_players').select('room_id').eq('player_id', user.id).limit(2000),
+      supabase.from('session_players').select('session_id').eq('player_id', user.id).limit(2000),
+    ]);
+    if (roomErr) throw roomErr;
+    if (settledErr) throw settledErr;
+
+    const memberSessionIds = [...new Set([
+      ...(roomRows || []).map((row) => row.room_id),
+      ...(settledRows || []).map((row) => row.session_id),
+    ])];
+    if (!memberSessionIds.length) {
+      setHistorySessions([]);
+      setExpandedHistoryId('');
+      setHistoryPage(1);
+      return;
+    }
+
     let sessions = [];
     if (ownerFeatureEnabled) {
       const { data, error } = await supabase
         .from('sessions')
         .select('id,created_at,status,owner_id')
+        .in('id', memberSessionIds)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(200);
       if (error) {
         if (isMissingOwnerColumnError(error)) {
           handleOwnerSchemaMissing();
           const fallback = await supabase
             .from('sessions')
             .select('id,created_at,status')
+            .in('id', memberSessionIds)
             .order('created_at', { ascending: false })
-            .limit(50);
+            .limit(200);
           if (fallback.error) throw fallback.error;
           sessions = fallback.data || [];
         } else {
@@ -562,8 +791,9 @@ export default function App() {
       const { data, error } = await supabase
         .from('sessions')
         .select('id,created_at,status')
+        .in('id', memberSessionIds)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(200);
       if (error) throw error;
       sessions = data || [];
     }
@@ -1101,7 +1331,7 @@ export default function App() {
       setRoomOwnerId('');
       setRmbPer2000(DEFAULT_RMB_PER_2000);
       setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
-      setLeaderboard([]);
+      setLeaderboardRows([]);
       setHistorySessions([]);
       setExpandedHistoryId('');
       setHistoryPage(1);
@@ -1131,11 +1361,43 @@ export default function App() {
       { room_id: room, player_id: 'mock-b', nickname: 'Mia', buy_in: 2000, final_chips: 1400 },
       { room_id: room, player_id: 'mock-c', nickname: 'Ken', buy_in: 3500, final_chips: 3500 },
     ]);
-    setLeaderboard([
-      { rank: 1, playerId: user.id, name: meName, totalSessions: 8, totalBuyIn: 24000, totalProfit: 5200, avgProfitPerSession: 650, roi: 21.7 },
-      { rank: 2, playerId: 'mock-c', name: 'Ken', totalSessions: 8, totalBuyIn: 26000, totalProfit: 1800, avgProfitPerSession: 225, roi: 6.9 },
-      { rank: 3, playerId: 'mock-a', name: 'Leo', totalSessions: 8, totalBuyIn: 28000, totalProfit: -2200, avgProfitPerSession: -275, roi: -7.9 },
-      { rank: 4, playerId: 'mock-b', name: 'Mia', totalSessions: 8, totalBuyIn: 18000, totalProfit: -4800, avgProfitPerSession: -600, roi: -26.7 },
+    setLeaderboardRows([
+      {
+        sessionId: room,
+        playerId: user.id,
+        playerName: meName,
+        buyIn: 3000,
+        netResult: 2000,
+        createdAt: new Date().toISOString(),
+        rmbPer2000: DEFAULT_RMB_PER_2000,
+      },
+      {
+        sessionId: room,
+        playerId: 'mock-c',
+        playerName: 'Ken',
+        buyIn: 3500,
+        netResult: 0,
+        createdAt: new Date().toISOString(),
+        rmbPer2000: DEFAULT_RMB_PER_2000,
+      },
+      {
+        sessionId: room,
+        playerId: 'mock-a',
+        playerName: 'Leo',
+        buyIn: 4000,
+        netResult: -1400,
+        createdAt: new Date().toISOString(),
+        rmbPer2000: DEFAULT_RMB_PER_2000,
+      },
+      {
+        sessionId: room,
+        playerId: 'mock-b',
+        playerName: 'Mia',
+        buyIn: 2000,
+        netResult: -600,
+        createdAt: new Date().toISOString(),
+        rmbPer2000: DEFAULT_RMB_PER_2000,
+      },
     ]);
     setHistorySessions([
       {
@@ -1186,9 +1448,9 @@ export default function App() {
     const editable = localMockMode || playerId === user?.id || (ownerFeatureEnabled && roomOwnerId === user?.id);
     if (!editable) return;
 
-    const current = toNonNegativeChipInt(buyInDrafts[playerId] ?? 0);
+    const current = toSignedChipIntOrNull(buyInDrafts[playerId] ?? 0) ?? 0;
     if (!Number.isFinite(current)) return;
-    const nextValue = Math.max(0, Math.round(current + delta * BUY_IN_STEP));
+    const nextValue = Math.round(current + delta * BUY_IN_STEP);
     setBuyInDrafts((prev) => ({ ...prev, [playerId]: String(nextValue) }));
   }
 
@@ -1234,9 +1496,10 @@ export default function App() {
     const merged = mergePlayersWithDrafts([player])[0];
     const topUpDraft = buyInDrafts[playerId];
     const topUpAmount =
-      canEditBuyIn && topUpDraft != null && topUpDraft !== '' ? toNonNegativeChipInt(topUpDraft) : null;
+      canEditBuyIn ? toSignedChipIntOrNull(topUpDraft) : null;
+    const currentBuyIn = toNonNegativeChipInt(player.buy_in);
     const nextBuyIn =
-      topUpAmount == null ? toNonNegativeChipInt(player.buy_in) : toNonNegativeChipInt(player.buy_in) + topUpAmount;
+      topUpAmount == null ? currentBuyIn : Math.max(0, currentBuyIn + topUpAmount);
     const nextFinal = canEditFinal
       ? merged.final_chips == null
         ? null
@@ -1245,8 +1508,8 @@ export default function App() {
         ? null
         : toNonNegativeChipInt(player.final_chips);
 
-    if (topUpAmount != null && (!Number.isFinite(topUpAmount) || topUpAmount < 0)) {
-      showNotice('本次买入金额不合法', 'error');
+    if (topUpDraft != null && String(topUpDraft).trim() !== '' && topUpAmount == null) {
+      showNotice('本次买入仅支持整数，可输入负数用于冲正', 'error');
       return;
     }
     if (!Number.isFinite(nextBuyIn) || nextBuyIn < 0) {
@@ -1637,9 +1900,13 @@ export default function App() {
     setRoomOwnerId('');
     setRmbPer2000(DEFAULT_RMB_PER_2000);
     setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
+    setLeaderboardRows([]);
     setHistorySessions([]);
     setExpandedHistoryId('');
     setHistoryPage(1);
+    setDatePreset('all');
+    setCustomStartDate('');
+    setCustomEndDate('');
     setOpenRooms([]);
     setDissolveConfirmOpen(false);
     setIsDissolving(false);
@@ -1682,6 +1949,7 @@ export default function App() {
     setRoomOwnerId('');
     setRmbPer2000(DEFAULT_RMB_PER_2000);
     setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
+    setLeaderboardRows([]);
     setHistoryPage(1);
     setDissolveConfirmOpen(false);
     setIsDissolving(false);
@@ -1760,10 +2028,21 @@ export default function App() {
   }, [leaderboardView]);
 
   useEffect(() => {
+    setShowAllLeaderboard(false);
+    setExpandedLeaderboardId('');
+  }, [datePreset, customStartDate, customEndDate]);
+
+  useEffect(() => {
     if (historyPage > historyPageCount) {
       setHistoryPage(historyPageCount);
     }
   }, [historyPage, historyPageCount]);
+
+  useEffect(() => {
+    if (activeTab !== 'leaderboard') {
+      setDatePopoverOpen(false);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     setExpandedHistoryId((prev) => (pagedHistorySessions.some((item) => item.id === prev) ? prev : ''));
@@ -1810,7 +2089,7 @@ export default function App() {
     return (
       <main className="safe-area-bottom w-full px-3 py-4 sm:px-4 md:mx-auto md:max-w-6xl md:py-8">
         <section className="glass-card rounded-3xl p-4 sm:mx-auto sm:max-w-md sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Texas Hold'em Score</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{APP_SUBTITLE}</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-ink">{APP_NAME}</h1>
 
           <label className="mt-5 block">
@@ -1897,7 +2176,7 @@ export default function App() {
       <section className="glass-card relative rounded-3xl p-4 sm:p-5">
         <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 w-full">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Texas Hold'em Score</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{APP_SUBTITLE}</p>
             <h1 className="app-title mt-1.5 text-2xl font-semibold tracking-tight text-ink sm:text-3xl">{APP_NAME}</h1>
             <div className="mt-1 flex items-center justify-between gap-3">
               <p className={`text-sm text-slate-600 transition ${welcomePulse ? 'welcome-pulse' : ''}`}>
@@ -2083,14 +2362,14 @@ export default function App() {
                 <span className="ml-2 font-bold tracking-tight">{joinedRoomId || '-'}</span>
               </h2>
               {hasJoinedRoom && ownerFeatureEnabled && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                <span className="room-owner-highlight inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold">
                   <OwnerCrown className="h-4 w-4" />
                   房主 {roomOwnerName}
                 </span>
               )}
             </div>
             <div className="tab-scroll flex flex-nowrap items-center gap-2 overflow-x-auto">
-              <button className="btn-secondary min-w-[92px] whitespace-nowrap px-3 py-1.5 text-xs" onClick={leaveCurrentRoom}>
+              <button className="btn-secondary room-switch-btn min-w-[92px] whitespace-nowrap px-3 py-1.5 text-xs" onClick={leaveCurrentRoom}>
                 切换房间
               </button>
               {roomStatus === 'settled' && (
@@ -2120,7 +2399,9 @@ export default function App() {
                 </p>
                 <div className="flex items-center gap-2">
                   <input
-                    className="field-input w-36"
+                    className={`field-input w-36 ${
+                      !amRoomOwner && !localMockMode ? 'bg-slate-100/90 text-slate-400 border-slate-200' : ''
+                    }`}
                     type="number"
                     min="0.01"
                     step="0.01"
@@ -2168,7 +2449,7 @@ export default function App() {
             className={
               showMineOnly
                 ? 'grid grid-cols-1 gap-2.5'
-                : 'tab-scroll flex justify-center gap-2.5 overflow-x-auto pb-1 [scrollbar-width:thin]'
+                : 'tab-scroll flex snap-x snap-mandatory gap-3 overflow-x-auto px-0.5 pb-1 [scrollbar-width:thin]'
             }
           >
             {visiblePlayers.map((p) => {
@@ -2192,7 +2473,7 @@ export default function App() {
                 key={p.player_id}
                 className={`rounded-2xl border bg-white/85 p-3.5 shadow-sm sm:p-4 ${
                   mine ? 'border-sky-300 ring-2 ring-sky-100' : 'border-white/70'
-                } ${showMineOnly ? '' : 'min-w-[min(62vw,288px)] shrink-0 sm:min-w-[245px] sm:max-w-[288px]'}`}
+                } ${showMineOnly ? '' : 'w-[95%] max-w-[38rem] shrink-0 snap-center sm:w-[90%]'}`}
               >
                 <div className="mb-2.5 flex items-center gap-1.5 break-all text-base font-semibold text-slate-900">
                   {p.nickname}
@@ -2209,7 +2490,7 @@ export default function App() {
 
                 <label className="block">
                   <span className="field-label">本次买入</span>
-                  <div className="mt-1 flex items-center gap-2">
+                  <div className="mt-1 grid grid-cols-[1fr_auto] items-center gap-2">
                     <input
                       className="field-input no-spin min-w-0 flex-1"
                       type="text"
@@ -2221,7 +2502,7 @@ export default function App() {
                       onChange={(e) => {
                         if (!canEditBuyIn) return;
                         const raw = e.target.value;
-                        if (!/^\d*$/.test(raw)) return;
+                        if (!/^-?\d*$/.test(raw)) return;
                         setBuyInDrafts((prev) => ({ ...prev, [p.player_id]: raw }));
                       }}
                       onKeyDown={(e) => {
@@ -2233,11 +2514,11 @@ export default function App() {
                         }
                       }}
                     />
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center justify-end gap-2">
                       <button
                         type="button"
                         disabled={!canEditBuyIn}
-                        className="step-btn min-h-[44px] min-w-[68px]"
+                        className="step-btn min-h-[44px] min-w-[58px] px-2.5"
                         onClick={() => adjustBuyIn(p, -1)}
                       >
                         -2k
@@ -2245,7 +2526,7 @@ export default function App() {
                       <button
                         type="button"
                         disabled={!canEditBuyIn}
-                        className="step-btn step-btn-positive min-h-[44px] min-w-[68px]"
+                        className="step-btn step-btn-positive min-h-[44px] min-w-[58px] px-2.5"
                         onClick={() => adjustBuyIn(p, 1)}
                       >
                         +2k
@@ -2375,32 +2656,45 @@ export default function App() {
 
       {activeTab === 'leaderboard' && (
       <section className={`${tabSlideClass} glass-card panel-fill mt-3 flex flex-col rounded-3xl p-4 sm:mt-4 sm:p-6`}>
-        <div className="flex shrink-0 items-center justify-between gap-3">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2.5">
           <h2 className="text-xl font-semibold leading-none text-ink sm:text-2xl">历史积分榜</h2>
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-sm shadow-sm backdrop-blur-md">
-            <span className="text-slate-500">累计总局数</span>
-            <span className="font-semibold text-slate-900">{globalStats.settledSessions}</span>
+          <div className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-sm shadow-sm backdrop-blur-md whitespace-nowrap">
+              <span className="text-slate-500">累计总局数</span>
+              <span className="font-semibold text-slate-900">{filteredLeaderboardSessionCount}</span>
           </div>
         </div>
+        <div className="mt-2 w-full">{renderDatePopover()}</div>
         <div className="tab-scroll segmented-shell relative mt-3 min-h-[3.3rem] overflow-x-auto p-1">
-          <div className="relative z-[1] grid min-w-full grid-cols-3 gap-2">
+          <div className="relative z-[1] inline-flex min-w-full gap-2 pr-1">
           <button
-            className={`${leaderboardView === 'profit' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] w-full whitespace-nowrap`}
+            className={`${leaderboardView === 'profit' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
             onClick={() => setLeaderboardView('profit')}
           >
             净盈利
           </button>
           <button
-            className={`${leaderboardView === 'roi' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] w-full whitespace-nowrap`}
+            className={`${leaderboardView === 'roi' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
             onClick={() => setLeaderboardView('roi')}
           >
             ROI
           </button>
           <button
-            className={`${leaderboardView === 'efficiency' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] w-full whitespace-nowrap`}
+            className={`${leaderboardView === 'efficiency' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[106px] whitespace-nowrap`}
             onClick={() => setLeaderboardView('efficiency')}
           >
             场均盈利
+          </button>
+          <button
+            className={`${leaderboardView === 'amount' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
+            onClick={() => setLeaderboardView('amount')}
+          >
+            金额
+          </button>
+          <button
+            className={`${leaderboardView === 'winRate' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
+            onClick={() => setLeaderboardView('winRate')}
+          >
+            胜率
           </button>
           </div>
         </div>
@@ -2416,13 +2710,21 @@ export default function App() {
                 ? toChips(p.totalProfit)
                 : leaderboardView === 'roi'
                   ? `${p.roi > 0 ? '+' : ''}${p.roi.toFixed(1)}%`
-                  : toChips(p.avgProfitPerSession);
+                  : leaderboardView === 'amount'
+                    ? toRmb(p.amountRmb)
+                    : leaderboardView === 'winRate'
+                      ? `${p.winRate > 0 ? '+' : ''}${p.winRate.toFixed(1)}%`
+                      : toChips(p.avgProfitPerSession);
             const metricIsPositive =
               leaderboardView === 'profit'
                 ? p.totalProfit >= 0
                 : leaderboardView === 'roi'
                   ? p.roi >= 0
-                  : p.avgProfitPerSession >= 0;
+                  : leaderboardView === 'amount'
+                    ? p.amountRmb >= 0
+                    : leaderboardView === 'winRate'
+                      ? p.winRate >= 0
+                      : p.avgProfitPerSession >= 0;
             return (
               <article
                 key={p.playerId}
@@ -2469,10 +2771,14 @@ export default function App() {
                   </div>
                 </button>
                 {expanded && (
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-5">
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-3">
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">
                       <p>总局数</p>
                       <p className="mt-0.5 font-semibold text-slate-900">{p.totalSessions}</p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                      <p>盈利场次</p>
+                      <p className="mt-0.5 font-semibold text-slate-900">{p.winningGames}</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">
                       <p>总买入</p>
@@ -2491,11 +2797,20 @@ export default function App() {
                       </p>
                     </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                      <p>金额</p>
+                      <p className={`mt-0.5 font-semibold ${p.amountRmb >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {toRmb(p.amountRmb)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
                       <p>ROI</p>
                       <p className={`mt-0.5 font-semibold ${p.roi >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                         {p.roi > 0 ? '+' : ''}
                         {p.roi.toFixed(1)}%
                       </p>
+                    </div>
+                    <div className="sm:col-span-3">
+                      <WinRateRing value={p.winRate} />
                     </div>
                   </div>
                 )}
@@ -2520,7 +2835,7 @@ export default function App() {
         <h2 className="shrink-0 text-xl font-semibold text-ink sm:text-2xl">历史记录</h2>
         <div className="mt-3 flex flex-1 flex-col">
           <div className="space-y-2.5">
-          {!historySessions.length && (
+          {!filteredHistorySessions.length && (
             <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">暂无历史对局</div>
           )}
           {pagedHistorySessions.map((session, idx) => {
@@ -2528,7 +2843,7 @@ export default function App() {
             return (
               <article
                 key={session.id}
-                className="stagger-item rounded-2xl border border-slate-200 bg-gradient-to-br from-white/95 to-slate-50/80 p-2.5 shadow-sm"
+                className="history-fade-up rounded-2xl border border-slate-200 bg-gradient-to-br from-white/95 to-slate-50/80 p-2.5 shadow-sm"
                 style={{ animationDelay: `${Math.min(idx, 8) * 45}ms` }}
               >
                 <button

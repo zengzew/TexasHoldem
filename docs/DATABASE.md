@@ -1,4 +1,4 @@
-# 数据库文档（Supabase）
+# 数据库文档（Supabase, v2.1.0）
 
 ## 1. 初始化
 
@@ -13,6 +13,8 @@
 1. `profiles`
 - `id uuid` -> 关联 `auth.users.id`
 - `nickname text` -> 昵称（大小写不敏感唯一）
+- `total_games int` -> 累计总场次（触发器维护）
+- `winning_games int` -> 盈利场次（`net_result > 0`，触发器维护）
 
 2. `sessions`
 - `id text` -> 房间号
