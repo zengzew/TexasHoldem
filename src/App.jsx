@@ -200,6 +200,7 @@ export default function App() {
   const [dissolveConfirmOpen, setDissolveConfirmOpen] = useState(false);
   const [isDissolving, setIsDissolving] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [leaderboardCollapsedCount, setLeaderboardCollapsedCount] = useState(5);
 
   const roomChannelRef = useRef(null);
   const settleInFlightRef = useRef(false);
@@ -209,6 +210,7 @@ export default function App() {
   const prevTabRef = useRef('room');
   const BUY_IN_STEP = 2000;
   const HISTORY_PAGE_SIZE = 5;
+  const LEADERBOARD_COLLAPSED_COUNT = leaderboardCollapsedCount;
   const DEFAULT_RMB_PER_2000 = 100;
   const TAB_ORDER = { room: 0, leaderboard: 1, history: 2 };
   const DATE_PRESETS = [
@@ -297,11 +299,11 @@ export default function App() {
         {datePopoverOpen && (
           <>
             <button
-              className="fixed inset-0 z-40 bg-transparent"
+              className="fixed inset-0 z-40 bg-slate-900/24"
               onClick={() => setDatePopoverOpen(false)}
               aria-label="关闭日期筛选"
             />
-            <div className="date-popover absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(92vw,24rem)] rounded-2xl border border-slate-200/80 bg-white p-3 shadow-xl backdrop-blur-md">
+            <div className="date-popover absolute left-1/2 top-[calc(100%+0.5rem)] z-50 w-[min(92vw,24rem)] -translate-x-1/2 rounded-2xl border border-white/80 bg-white/96 p-3 shadow-xl backdrop-blur-md">
               <div className="account-popover-arrow" aria-hidden />
               <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-[96px_1fr]">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-1">
@@ -331,7 +333,7 @@ export default function App() {
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   <label className="block">
-                    <span className="field-label">开始日期</span>
+                    <span className="field-label text-black">开始日期</span>
                     <input
                       type="date"
                       lang="en-CA"
@@ -345,7 +347,7 @@ export default function App() {
                     />
                   </label>
                   <label className="block">
-                    <span className="field-label">结束日期</span>
+                    <span className="field-label text-black">结束日期</span>
                     <input
                       type="date"
                       lang="en-CA"
@@ -432,8 +434,8 @@ export default function App() {
     return sortLeaderboardRows(aggregated, leaderboardView);
   }, [effectiveLeaderboardRows, leaderboardView]);
   const visibleLeaderboard = useMemo(
-    () => (showAllLeaderboard ? rankedLeaderboard : rankedLeaderboard.slice(0, 5)),
-    [rankedLeaderboard, showAllLeaderboard]
+    () => (showAllLeaderboard ? rankedLeaderboard : rankedLeaderboard.slice(0, LEADERBOARD_COLLAPSED_COUNT)),
+    [rankedLeaderboard, showAllLeaderboard, LEADERBOARD_COLLAPSED_COUNT]
   );
   const filteredHistorySessions = useMemo(
     () => historySessions,
@@ -2028,6 +2030,22 @@ export default function App() {
   }, [leaderboardView]);
 
   useEffect(() => {
+    function updateCollapsedCount() {
+      if (typeof window === 'undefined') return;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      if (width >= 640) {
+        setLeaderboardCollapsedCount(5);
+        return;
+      }
+      setLeaderboardCollapsedCount(height >= 900 ? 5 : 4);
+    }
+    updateCollapsedCount();
+    window.addEventListener('resize', updateCollapsedCount);
+    return () => window.removeEventListener('resize', updateCollapsedCount);
+  }, []);
+
+  useEffect(() => {
     setShowAllLeaderboard(false);
     setExpandedLeaderboardId('');
   }, [datePreset, customStartDate, customEndDate]);
@@ -2698,7 +2716,7 @@ export default function App() {
           </button>
           </div>
         </div>
-        <div className="tab-scroll mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
+          <div className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
           {!visibleLeaderboard.length && (
             <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">暂无数据</div>
           )}
@@ -2743,8 +2761,8 @@ export default function App() {
                   <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3">
                     <span className="rank-pill">#{p.displayRank}</span>
                     <div className="min-w-0">
-                      <h3 className="flex items-center gap-1.5 text-lg font-semibold leading-tight text-slate-900 break-all">
-                        <span>{p.name}</span>
+                      <h3 className="flex min-w-0 items-center gap-1.5 text-lg font-semibold leading-tight text-slate-900">
+                        <span className="min-w-0 truncate">{p.name}</span>
                         {mine && (
                           <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700">
                             我
@@ -2817,13 +2835,13 @@ export default function App() {
               </article>
             );
           })}
-          {rankedLeaderboard.length > 5 && (
+          {rankedLeaderboard.length > LEADERBOARD_COLLAPSED_COUNT && (
             <button
               type="button"
               className="w-full rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white"
               onClick={() => setShowAllLeaderboard((prev) => !prev)}
             >
-              {showAllLeaderboard ? '收起排名' : `展开查看更多（+${rankedLeaderboard.length - 5}）`}
+              {showAllLeaderboard ? '收起排名' : '查看更多'}
             </button>
           )}
         </div>
@@ -3006,14 +3024,14 @@ export default function App() {
       {accountMenuOpen && (
         <div className="fixed inset-0 z-[58]">
           <button
-            className="absolute inset-0 bg-slate-900/15"
+            className="absolute inset-0 bg-slate-900/22"
             onClick={() => {
               setAccountMenuOpen(false);
               setSettingsError('');
             }}
             aria-label="关闭账户菜单"
           />
-          <div className="account-popover absolute right-4 top-[7rem] w-[min(68vw,22rem)] min-w-[15.5rem] rounded-2xl border border-white/70 bg-white/82 p-3 shadow-xl backdrop-blur-2xl md:right-[max(1rem,calc((100vw-72rem)/2+1rem))]">
+          <div className="account-popover absolute right-4 top-[7rem] w-[min(68vw,22rem)] min-w-[15.5rem] rounded-2xl border border-white/80 bg-white/96 p-3 shadow-xl backdrop-blur-2xl md:right-[max(1rem,calc((100vw-72rem)/2+1rem))]">
             <div className="account-popover-arrow" aria-hidden />
             <div className="segmented-shell p-1">
               <div className="grid grid-cols-2 gap-2">
@@ -3047,7 +3065,7 @@ export default function App() {
             <div key={settingsTab} className="account-pane-slide mt-2">
               {settingsTab === 'nickname' ? (
                 <label className="block">
-                  <span className="field-label">新昵称</span>
+                  <span className="field-label text-black">新昵称</span>
                   <input
                     className="account-input"
                     value={newNickname}
@@ -3060,7 +3078,7 @@ export default function App() {
                 </label>
               ) : (
                 <label className="block">
-                  <span className="field-label">新密码</span>
+                  <span className="field-label text-black">新密码</span>
                   <input
                     className="account-input"
                     value={newPassword}
