@@ -1,4 +1,4 @@
-# 部署文档（Vercel + Supabase, v2.1.2）
+# 部署文档（Vercel + Supabase, v2.1.3）
 
 ## 1. 前置准备
 

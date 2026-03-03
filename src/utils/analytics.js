@@ -3,22 +3,32 @@ function parseNum(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+const BEIJING_OFFSET_HOURS = 8;
+
+function beijingTimeToUtc(year, monthIndex, day, hour = 0, minute = 0, second = 0, ms = 0) {
+  return new Date(Date.UTC(year, monthIndex, day, hour - BEIJING_OFFSET_HOURS, minute, second, ms));
+}
+
 function toStartOfDay(dateValue) {
   const d = new Date(dateValue);
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+  return beijingTimeToUtc(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0);
 }
 
 function toEndOfDay(dateValue) {
   const d = new Date(dateValue);
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+  return beijingTimeToUtc(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999);
 }
 
 export function buildDateRange({ preset = 'all', customStart = '', customEnd = '', now = new Date() } = {}) {
   const safeNow = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
   const safePreset = preset || 'all';
+  const beijingNow = new Date(safeNow.getTime() + BEIJING_OFFSET_HOURS * 60 * 60 * 1000);
+  const bjYear = beijingNow.getUTCFullYear();
+  const bjMonth = beijingNow.getUTCMonth();
+  const bjDay = beijingNow.getUTCDate();
 
-  const customFrom = customStart ? new Date(`${customStart}T00:00:00.000Z`) : null;
-  const customTo = customEnd ? new Date(`${customEnd}T23:59:59.999Z`) : null;
+  const customFrom = customStart ? new Date(`${customStart}T00:00:00.000+08:00`) : null;
+  const customTo = customEnd ? new Date(`${customEnd}T23:59:59.999+08:00`) : null;
 
   if (safePreset === 'all') {
     return {
@@ -27,15 +37,15 @@ export function buildDateRange({ preset = 'all', customStart = '', customEnd = '
     };
   }
 
-  const end = toEndOfDay(safeNow);
+  const end = beijingTimeToUtc(bjYear, bjMonth, bjDay, 23, 59, 59, 999);
   let start;
 
   if (safePreset === '3m') {
-    start = new Date(Date.UTC(safeNow.getUTCFullYear(), safeNow.getUTCMonth() - 3, 1, 0, 0, 0, 0));
+    start = beijingTimeToUtc(bjYear, bjMonth - 3, 1, 0, 0, 0, 0);
   } else if (safePreset === '6m') {
-    start = new Date(Date.UTC(safeNow.getUTCFullYear(), safeNow.getUTCMonth() - 6, 1, 0, 0, 0, 0));
+    start = beijingTimeToUtc(bjYear, bjMonth - 6, 1, 0, 0, 0, 0);
   } else {
-    start = toStartOfDay(new Date(Date.UTC(safeNow.getUTCFullYear() - 1, safeNow.getUTCMonth(), safeNow.getUTCDate())));
+    start = beijingTimeToUtc(bjYear - 1, bjMonth, bjDay, 0, 0, 0, 0);
   }
 
   return { from: start, to: end };

@@ -88,6 +88,16 @@ function ArrowRightIcon() {
   );
 }
 
+function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+      <rect x="3.5" y="5.5" width="17" height="15" rx="2.5" />
+      <path d="M7 3.5v4M17 3.5v4M3.5 9.5h17" />
+      <path d="M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01" />
+    </svg>
+  );
+}
+
 function WinRateRing({ value = 0 }) {
   const safe = Math.max(0, Math.min(100, Number(value || 0)));
   const radius = 17;
@@ -134,21 +144,38 @@ function padDatePart(value) {
   return String(value).padStart(2, '0');
 }
 
-function toLocalDateInput(dateLike = new Date()) {
+const BEIJING_TIME_ZONE = 'Asia/Shanghai';
+
+function toBeijingDateInput(dateLike = new Date()) {
   const date = dateLike instanceof Date ? dateLike : new Date(dateLike);
   if (Number.isNaN(date.getTime())) return '';
-  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BEIJING_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  const day = parts.find((part) => part.type === 'day')?.value;
+  if (!year || !month || !day) return '';
+  return `${year}-${month}-${day}`;
 }
 
-function toUtcDateInput(dateLike = new Date()) {
+function getBeijingYear(dateLike = new Date()) {
   const date = dateLike instanceof Date ? dateLike : new Date(dateLike);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
+  if (Number.isNaN(date.getTime())) return new Date().getUTCFullYear();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BEIJING_TIME_ZONE,
+    year: 'numeric',
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === 'year')?.value || 0);
+  return year || new Date().getUTCFullYear();
 }
 
 export default function App() {
-  const defaultEndDate = toLocalDateInput(new Date());
-  const defaultStartDate = `${String(new Date().getFullYear())}-01-01`;
+  const defaultEndDate = toBeijingDateInput(new Date());
+  const defaultStartDate = `${String(getBeijingYear(new Date()))}-01-01`;
   const [user, setUser] = useState(null);
   const [profileName, setProfileName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -202,6 +229,9 @@ export default function App() {
   const [actionLoading, setActionLoading] = useState(false);
   const [leaderboardCollapsedCount, setLeaderboardCollapsedCount] = useState(5);
   const [isRefreshingOpenRooms, setIsRefreshingOpenRooms] = useState(false);
+  const [refreshSpinTick, setRefreshSpinTick] = useState(0);
+  const startDateNativeRef = useRef(null);
+  const endDateNativeRef = useRef(null);
 
   const roomChannelRef = useRef(null);
   const settleInFlightRef = useRef(false);
@@ -277,13 +307,22 @@ export default function App() {
     if (!value) return '-';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '-';
-    return date.toLocaleString('zh-CN', {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: BEIJING_TIME_ZONE,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-    });
+      hour12: false,
+    }).formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    const hour = parts.find((part) => part.type === 'hour')?.value;
+    const minute = parts.find((part) => part.type === 'minute')?.value;
+    if (!year || !month || !day || !hour || !minute) return '-';
+    return `${year}-${month}-${day} ${hour}:${minute}`;
   }
 
   function renderDatePopover() {
@@ -292,7 +331,7 @@ export default function App() {
       <div className="relative">
         <button
           type="button"
-          className="btn-secondary inline-flex min-h-[44px] w-full items-center justify-center whitespace-nowrap px-3 py-2 text-xs sm:w-auto"
+          className="btn-secondary inline-flex min-h-[44px] w-full items-center justify-center whitespace-nowrap px-3 py-2 text-sm sm:w-auto"
           onClick={() => setDatePopoverOpen((prev) => !prev)}
         >
           {rangeText}
@@ -320,8 +359,8 @@ export default function App() {
                         setDatePreset(nextPreset);
                         if (nextPreset !== 'all') {
                           const range = buildDateRange({ preset: nextPreset, now: new Date() });
-                          const nextStart = range.from ? toUtcDateInput(range.from) : defaultStartDate;
-                          const nextEnd = range.to ? toUtcDateInput(range.to) : defaultEndDate;
+                          const nextStart = range.from ? toBeijingDateInput(range.from) : defaultStartDate;
+                          const nextEnd = range.to ? toBeijingDateInput(range.to) : defaultEndDate;
                           setCustomStartDate(nextStart);
                           setCustomEndDate(nextEnd);
                         }
@@ -332,34 +371,82 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-1 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <label className="block">
-                    <span className="field-label text-black">开始日期</span>
-                    <input
-                      type="date"
-                      lang="en-CA"
-                      className="account-input"
-                      value={customStartDate}
-                      onChange={(e) => {
-                        setCustomStartDate(e.target.value);
-                        setDatePreset('all');
-                        setDatePopoverOpen(false);
-                      }}
-                    />
+                    <span className="field-label text-black">开始</span>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        className="account-input pr-10 cursor-pointer"
+                        value={customStartDate}
+                        onClick={() => {
+                          startDateNativeRef.current?.showPicker?.();
+                          startDateNativeRef.current?.click();
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-slate-600"
+                        onClick={() => {
+                          startDateNativeRef.current?.showPicker?.();
+                          startDateNativeRef.current?.click();
+                        }}
+                        aria-label="选择开始日期"
+                      >
+                        <CalendarIcon />
+                      </button>
+                      <input
+                        ref={startDateNativeRef}
+                        type="date"
+                        lang="en-CA"
+                        className="pointer-events-none absolute h-0 w-0 opacity-0"
+                        value={customStartDate}
+                        onChange={(e) => {
+                          setCustomStartDate(e.target.value);
+                          setDatePreset('all');
+                          setDatePopoverOpen(false);
+                        }}
+                      />
+                    </div>
                   </label>
                   <label className="block">
-                    <span className="field-label text-black">结束日期</span>
-                    <input
-                      type="date"
-                      lang="en-CA"
-                      className="account-input"
-                      value={customEndDate}
-                      onChange={(e) => {
-                        setCustomEndDate(e.target.value);
-                        setDatePreset('all');
-                        setDatePopoverOpen(false);
-                      }}
-                    />
+                    <span className="field-label text-black">结束</span>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        readOnly
+                        className="account-input pr-10 cursor-pointer"
+                        value={customEndDate}
+                        onClick={() => {
+                          endDateNativeRef.current?.showPicker?.();
+                          endDateNativeRef.current?.click();
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-slate-600"
+                        onClick={() => {
+                          endDateNativeRef.current?.showPicker?.();
+                          endDateNativeRef.current?.click();
+                        }}
+                        aria-label="选择结束日期"
+                      >
+                        <CalendarIcon />
+                      </button>
+                      <input
+                        ref={endDateNativeRef}
+                        type="date"
+                        lang="en-CA"
+                        className="pointer-events-none absolute h-0 w-0 opacity-0"
+                        value={customEndDate}
+                        onChange={(e) => {
+                          setCustomEndDate(e.target.value);
+                          setDatePreset('all');
+                          setDatePopoverOpen(false);
+                        }}
+                      />
+                    </div>
                   </label>
                 </div>
               </div>
@@ -2310,13 +2397,14 @@ export default function App() {
             <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/80 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-amber-800">未结算房间</p>
-                <button
-                  className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-amber-200 bg-white/80 px-3 py-1.5 text-amber-700 transition hover:bg-white"
-                  disabled={isRefreshingOpenRooms}
-                  onClick={async () => {
-                    try {
-                      setIsRefreshingOpenRooms(true);
-                      await loadOpenRooms();
+                  <button
+                    className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-amber-200 bg-white/80 px-3 py-1.5 text-amber-700 transition hover:bg-white"
+                    disabled={isRefreshingOpenRooms}
+                    onClick={async () => {
+                      setRefreshSpinTick((prev) => prev + 1);
+                      try {
+                        setIsRefreshingOpenRooms(true);
+                        await loadOpenRooms();
                     } catch (err) {
                       showNotice(err.message, 'error');
                     } finally {
@@ -2326,7 +2414,10 @@ export default function App() {
                   aria-label="刷新未结算房间"
                   title="刷新"
                 >
-                  <RefreshIcon className={`h-4 w-4 ${isRefreshingOpenRooms ? 'animate-spin' : ''}`} />
+                  <RefreshIcon
+                    key={`refresh-${refreshSpinTick}`}
+                    className={`h-4 w-4 ${refreshSpinTick > 0 ? 'refresh-spin-once' : ''}`}
+                  />
                 </button>
               </div>
               <div className="mt-2 max-h-56 space-y-2 overflow-y-auto pr-1">
@@ -2781,8 +2872,10 @@ export default function App() {
                       </h3>
                       <p className="mt-1 truncate text-xs text-slate-500">总局数 {p.totalSessions}</p>
                     </div>
-                    <div className="w-20 text-right sm:w-24">
-                      <p className={`text-lg font-semibold ${metricIsPositive ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    <div className="w-[6.5rem] text-right sm:w-28">
+                      <p
+                        className={`whitespace-nowrap text-lg font-semibold tabular-nums ${metricIsPositive ? 'text-emerald-600' : 'text-rose-600'}`}
+                      >
                         {metricValue}
                       </p>
                     </div>
@@ -2935,7 +3028,7 @@ export default function App() {
                                   <span className={`font-semibold ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
                                     {toChips(player.netResult)} 积分
                                   </span>
-                                  <span className="ml-1 text-slate-500">
+                                  <span className={`ml-1 font-semibold ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
                                     ({toRmb(chipsToRmb(player.netResult, session.rmbPer2000))})
                                   </span>
                                 </p>
@@ -3068,7 +3161,6 @@ export default function App() {
             <div key={settingsTab} className="account-pane-slide mt-2">
               {settingsTab === 'nickname' ? (
                 <label className="block">
-                  <span className="field-label text-black">新昵称</span>
                   <input
                     className="account-input"
                     value={newNickname}
@@ -3081,7 +3173,6 @@ export default function App() {
                 </label>
               ) : (
                 <label className="block">
-                  <span className="field-label text-black">新密码</span>
                   <input
                     className="account-input"
                     value={newPassword}

@@ -5,14 +5,14 @@ describe('analytics utils', () => {
   it('buildDateRange handles 3m preset', () => {
     const now = new Date('2026-03-02T12:00:00.000Z');
     const range = buildDateRange({ preset: '3m', now });
-    expect(range.from?.toISOString()).toBe('2025-12-01T00:00:00.000Z');
-    expect(range.to?.toISOString()).toBe('2026-03-02T23:59:59.999Z');
+    expect(range.from?.toISOString()).toBe('2025-11-30T16:00:00.000Z');
+    expect(range.to?.toISOString()).toBe('2026-03-02T15:59:59.999Z');
   });
 
   it('buildDateRange handles custom range for all preset', () => {
     const range = buildDateRange({ preset: 'all', customStart: '2026-02-01', customEnd: '2026-02-20' });
-    expect(range.from?.toISOString()).toBe('2026-02-01T00:00:00.000Z');
-    expect(range.to?.toISOString()).toBe('2026-02-20T23:59:59.999Z');
+    expect(range.from?.toISOString()).toBe('2026-01-31T16:00:00.000Z');
+    expect(range.to?.toISOString()).toBe('2026-02-20T15:59:59.999Z');
   });
 
   it('filters rows by date range inclusively', () => {
