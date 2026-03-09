@@ -3,6 +3,7 @@ import { hasSupabaseConfig, supabase } from './supabase';
 import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
+import { clearPersistedJoinedRoom, loadPersistedJoinedRoom, savePersistedJoinedRoom } from './utils/roomState';
 import ownerCrownIcon from './assets/owner-crown.svg';
 import chevronDownIcon from './assets/chevron-down.svg';
 import medalGoldIcon from './assets/medal-gold.svg';
@@ -52,6 +53,48 @@ function LoadingSpinner({ className = 'h-4 w-4' }) {
       <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
   );
+}
+
+function AnimatedNumber({ value = 0, format = (n) => String(Math.round(n)), className = '', duration = 320 }) {
+  const target = Number.isFinite(Number(value)) ? Number(value) : 0;
+  const [displayValue, setDisplayValue] = useState(target);
+  const previousRef = useRef(target);
+
+  useEffect(() => {
+    const start = previousRef.current;
+    const end = target;
+    if (Math.abs(end - start) < 0.0001) {
+      setDisplayValue(end);
+      previousRef.current = end;
+      return undefined;
+    }
+    if (typeof window === 'undefined') {
+      setDisplayValue(end);
+      previousRef.current = end;
+      return undefined;
+    }
+
+    let rafId = 0;
+    const startedAt = performance.now();
+    const easeOutCubic = (t) => 1 - (1 - t) ** 3;
+
+    const tick = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = easeOutCubic(progress);
+      const next = start + (end - start) * eased;
+      setDisplayValue(next);
+      if (progress < 1) {
+        rafId = window.requestAnimationFrame(tick);
+        return;
+      }
+      previousRef.current = end;
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [target, duration]);
+
+  return <span className={className}>{format(displayValue)}</span>;
 }
 
 function AccountAvatarIcon() {
@@ -230,11 +273,18 @@ export default function App() {
   const [leaderboardCollapsedCount, setLeaderboardCollapsedCount] = useState(5);
   const [isRefreshingOpenRooms, setIsRefreshingOpenRooms] = useState(false);
   const [refreshSpinTick, setRefreshSpinTick] = useState(0);
+  const [addPlayerNickname, setAddPlayerNickname] = useState('');
+  const [isAddingPlayer, setIsAddingPlayer] = useState(false);
+  const [kickingPlayerId, setKickingPlayerId] = useState('');
+  const [confirmingPlayerIds, setConfirmingPlayerIds] = useState({});
+  const [profileDirectory, setProfileDirectory] = useState([]);
+  const [addPlayerFocus, setAddPlayerFocus] = useState(false);
   const startDateNativeRef = useRef(null);
   const endDateNativeRef = useRef(null);
 
   const roomChannelRef = useRef(null);
   const settleInFlightRef = useRef(false);
+  const confirmInFlightPlayerIdsRef = useRef(new Set());
   const actionLockRef = useRef(false);
   const ownerSchemaNoticeShownRef = useRef(false);
   const rmbSchemaNoticeShownRef = useRef(false);
@@ -537,6 +587,18 @@ export default function App() {
     const start = (historyPage - 1) * HISTORY_PAGE_SIZE;
     return filteredHistorySessions.slice(start, start + HISTORY_PAGE_SIZE);
   }, [filteredHistorySessions, historyPage]);
+  const addPlayerSuggestions = useMemo(() => {
+    const query = normalizeNickname(addPlayerNickname).toLowerCase();
+    if (!query) return [];
+    const existingPlayerIds = new Set(activePlayers.map((player) => player.player_id));
+    return profileDirectory
+      .filter((row) => {
+        const normalized = normalizeNickname(row.nickname).toLowerCase();
+        if (!normalized.startsWith(query)) return false;
+        return !existingPlayerIds.has(row.id);
+      })
+      .slice(0, 8);
+  }, [addPlayerNickname, profileDirectory, activePlayers]);
 
   function nicknameToEmail(rawNickname) {
     const normalized = normalizeNickname(rawNickname).toLowerCase();
@@ -550,6 +612,11 @@ export default function App() {
 
   function normalizeNickname(rawNickname) {
     return String(rawNickname || '').normalize('NFKC').trim().replace(/\s+/g, '');
+  }
+
+  function persistJoinedRoomForCurrentUser(nextRoomId) {
+    if (!user?.id) return;
+    savePersistedJoinedRoom(user.id, nextRoomId, null);
   }
 
   function normalizePasswordLegacy(rawPassword) {
@@ -730,6 +797,12 @@ export default function App() {
     });
 
     setLeaderboardRows(mapped);
+  }
+
+  async function loadProfileDirectory() {
+    const { data, error } = await supabase.from('profiles').select('id,nickname').limit(5000);
+    if (error) throw error;
+    setProfileDirectory(data || []);
   }
 
   async function loadOpenRooms() {
@@ -1158,8 +1231,11 @@ export default function App() {
     setMockPlayers([]);
     setBuyInDrafts({});
     setFinalChipsDrafts({});
+    confirmInFlightPlayerIdsRef.current.clear();
+    setConfirmingPlayerIds({});
     setJoinedRoomId(nextRoomId);
     setRoomId(nextRoomId);
+    persistJoinedRoomForCurrentUser(nextRoomId);
     await subscribeRoom(nextRoomId);
     await loadRoom(nextRoomId);
     await loadHistorySessions();
@@ -1296,6 +1372,101 @@ export default function App() {
     }
   }
 
+  async function addPlayerToRoom(targetProfile = null) {
+    if (!joinedRoomId) return;
+    if (!amRoomOwner) {
+      showNotice('仅房主可添加玩家', 'error');
+      return;
+    }
+    if (roomStatus === 'settled') {
+      showNotice('已结算房间不能再添加玩家', 'error');
+      return;
+    }
+
+    const nickname = normalizeNickname(targetProfile?.nickname || addPlayerNickname);
+    if (!nickname) {
+      showNotice('请输入要添加的玩家昵称', 'error');
+      return;
+    }
+
+    setIsAddingPlayer(true);
+    try {
+      let targetPlayer = targetProfile;
+      if (!targetPlayer) {
+        targetPlayer = profileDirectory.find(
+          (row) => normalizeNickname(row.nickname).toLowerCase() === nickname.toLowerCase()
+        );
+      }
+      if (!targetPlayer) {
+        const { data: profileRows, error: profileErr } = await supabase.from('profiles').select('id,nickname').limit(5000);
+        if (profileErr) throw profileErr;
+        setProfileDirectory(profileRows || []);
+        targetPlayer = (profileRows || []).find(
+        (row) => normalizeNickname(row.nickname).toLowerCase() === nickname.toLowerCase()
+      );
+      }
+      if (!targetPlayer) {
+        throw createAppError('PLAYER_NOT_FOUND', '该昵称未注册，无法添加');
+      }
+
+      const { error: insertErr } = await supabase.from('room_players').insert({
+        room_id: joinedRoomId,
+        player_id: targetPlayer.id,
+        buy_in: 2000,
+        final_chips: null,
+      });
+      if (insertErr) {
+        const message = `${insertErr.message || ''} ${insertErr.details || ''}`.toLowerCase();
+        if (insertErr.code === '23505' || message.includes('duplicate')) {
+          throw createAppError('PLAYER_EXISTS', '该玩家已经在当前房间');
+        }
+        throw insertErr;
+      }
+
+      setAddPlayerNickname('');
+      setAddPlayerFocus(false);
+      showNotice(`已添加玩家 ${targetPlayer.nickname}`, 'success');
+      await loadRoom(joinedRoomId);
+      await loadOpenRooms();
+    } finally {
+      setIsAddingPlayer(false);
+    }
+  }
+
+  async function removePlayerFromRoom(targetPlayer) {
+    if (!joinedRoomId) return;
+    if (!amRoomOwner) {
+      showNotice('仅房主可移除玩家', 'error');
+      return;
+    }
+    if (!targetPlayer?.player_id) return;
+    if (targetPlayer.player_id === roomOwnerId) {
+      showNotice('房主不能被移除', 'error');
+      return;
+    }
+    if (roomStatus === 'settled') {
+      showNotice('已结算房间不能移除玩家', 'error');
+      return;
+    }
+
+    setKickingPlayerId(targetPlayer.player_id);
+    try {
+      const { error } = await supabase
+        .from('room_players')
+        .delete()
+        .eq('room_id', joinedRoomId)
+        .eq('player_id', targetPlayer.player_id);
+      if (error) throw error;
+
+      clearPlayerDrafts(targetPlayer.player_id);
+      showNotice(`已移除玩家 ${targetPlayer.nickname || ''}`, 'success');
+      await loadRoom(joinedRoomId);
+      await loadOpenRooms();
+    } finally {
+      setKickingPlayerId('');
+    }
+  }
+
   function requestDissolveRoom() {
     if (!joinedRoomId) return;
     if (!localMockMode && !amRoomOwner) {
@@ -1314,6 +1485,7 @@ export default function App() {
     setIsDissolving(true);
     if (localMockMode) {
       setJoinedRoomId('');
+      persistJoinedRoomForCurrentUser('');
       setMockPlayers([]);
       setLocalMockMode(false);
       setPlayers([]);
@@ -1322,6 +1494,8 @@ export default function App() {
       setRoomOwnerId('');
       setBuyInDrafts({});
       setFinalChipsDrafts({});
+      confirmInFlightPlayerIdsRef.current.clear();
+      setConfirmingPlayerIds({});
       setOpenRooms([]);
       setDissolveConfirmOpen(false);
       setIsDissolving(false);
@@ -1348,12 +1522,15 @@ export default function App() {
         roomChannelRef.current = null;
       }
       setJoinedRoomId('');
+      persistJoinedRoomForCurrentUser('');
       setPlayers([]);
       setTransfers([]);
       setRoomStatus('active');
       setRoomOwnerId('');
       setBuyInDrafts({});
       setFinalChipsDrafts({});
+      confirmInFlightPlayerIdsRef.current.clear();
+      setConfirmingPlayerIds({});
       setDissolveConfirmOpen(false);
       showNotice('房间已解散', 'success');
       await loadOpenRooms();
@@ -1412,127 +1589,6 @@ export default function App() {
     }
   }
 
-  function toggleMockData() {
-    if (localMockMode) {
-      setLocalMockMode(false);
-      setMockPlayers([]);
-      setTransfers([]);
-      setRoomStatus('active');
-      setRoomOwnerId('');
-      setRmbPer2000(DEFAULT_RMB_PER_2000);
-      setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
-      setLeaderboardRows([]);
-      setHistorySessions([]);
-      setExpandedHistoryId('');
-      setHistoryPage(1);
-      showNotice('已退出 Mock 数据模式', 'success');
-      setBuyInDrafts({});
-      setFinalChipsDrafts({});
-      return;
-    }
-
-    const room = roomId || todayRoomId();
-    const meName = profileName || authNickname || '我';
-    setJoinedRoomId(room);
-    setLocalMockMode(true);
-    setRoomStatus('settled');
-    setRoomOwnerId(user.id);
-    setRmbPer2000(DEFAULT_RMB_PER_2000);
-    setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
-    setTransfers([
-      { fromPlayerId: 'mock-a', toPlayerId: user.id, amount: 1400 },
-      { fromPlayerId: 'mock-b', toPlayerId: user.id, amount: 600 },
-    ]);
-    setBuyInDrafts({});
-    setFinalChipsDrafts({});
-    setMockPlayers([
-      { room_id: room, player_id: user.id, nickname: meName, buy_in: 3000, final_chips: 5000 },
-      { room_id: room, player_id: 'mock-a', nickname: 'Leo', buy_in: 4000, final_chips: 2600 },
-      { room_id: room, player_id: 'mock-b', nickname: 'Mia', buy_in: 2000, final_chips: 1400 },
-      { room_id: room, player_id: 'mock-c', nickname: 'Ken', buy_in: 3500, final_chips: 3500 },
-    ]);
-    setLeaderboardRows([
-      {
-        sessionId: room,
-        playerId: user.id,
-        playerName: meName,
-        buyIn: 3000,
-        netResult: 2000,
-        createdAt: new Date().toISOString(),
-        rmbPer2000: DEFAULT_RMB_PER_2000,
-      },
-      {
-        sessionId: room,
-        playerId: 'mock-c',
-        playerName: 'Ken',
-        buyIn: 3500,
-        netResult: 0,
-        createdAt: new Date().toISOString(),
-        rmbPer2000: DEFAULT_RMB_PER_2000,
-      },
-      {
-        sessionId: room,
-        playerId: 'mock-a',
-        playerName: 'Leo',
-        buyIn: 4000,
-        netResult: -1400,
-        createdAt: new Date().toISOString(),
-        rmbPer2000: DEFAULT_RMB_PER_2000,
-      },
-      {
-        sessionId: room,
-        playerId: 'mock-b',
-        playerName: 'Mia',
-        buyIn: 2000,
-        netResult: -600,
-        createdAt: new Date().toISOString(),
-        rmbPer2000: DEFAULT_RMB_PER_2000,
-      },
-    ]);
-    setHistorySessions([
-      {
-        id: room,
-        createdAt: new Date().toISOString(),
-        status: 'settled',
-        ownerId: user.id,
-        ownerName: meName,
-        rmbPer2000: DEFAULT_RMB_PER_2000,
-        players: [
-          { playerId: user.id, nickname: meName, buyIn: 3000, finalChips: 5000, netResult: 2000 },
-          { playerId: 'mock-c', nickname: 'Ken', buyIn: 3500, finalChips: 3500, netResult: 0 },
-          { playerId: 'mock-a', nickname: 'Leo', buyIn: 4000, finalChips: 2600, netResult: -1400 },
-          { playerId: 'mock-b', nickname: 'Mia', buyIn: 2000, finalChips: 1400, netResult: -600 },
-        ],
-        transfers: [
-          { fromPlayerId: 'mock-a', toPlayerId: user.id, fromName: 'Leo', toName: meName, amount: 1400 },
-          { fromPlayerId: 'mock-b', toPlayerId: user.id, fromName: 'Mia', toName: meName, amount: 600 },
-        ],
-      },
-      {
-        id: `${room}-prev`,
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        status: 'settled',
-        ownerId: 'mock-c',
-        ownerName: 'Ken',
-        rmbPer2000: DEFAULT_RMB_PER_2000,
-        players: [
-          { playerId: 'mock-c', nickname: 'Ken', buyIn: 3000, finalChips: 4100, netResult: 1100 },
-          { playerId: user.id, nickname: meName, buyIn: 2800, finalChips: 2500, netResult: -300 },
-          { playerId: 'mock-a', nickname: 'Leo', buyIn: 3200, finalChips: 2900, netResult: -300 },
-          { playerId: 'mock-b', nickname: 'Mia', buyIn: 1500, finalChips: 1000, netResult: -500 },
-        ],
-        transfers: [
-          { fromPlayerId: user.id, toPlayerId: 'mock-c', fromName: meName, toName: 'Ken', amount: 300 },
-          { fromPlayerId: 'mock-a', toPlayerId: 'mock-c', fromName: 'Leo', toName: 'Ken', amount: 300 },
-          { fromPlayerId: 'mock-b', toPlayerId: 'mock-c', fromName: 'Mia', toName: 'Ken', amount: 500 },
-        ],
-      },
-    ]);
-    setExpandedHistoryId(room);
-    setHistoryPage(1);
-    showNotice('已加载 Mock 数据，可单账号测试完整流程（不写入数据库）', 'success');
-  }
-
   function adjustBuyIn(player, delta) {
     const playerId = player.player_id;
     const editable = localMockMode || playerId === user?.id || (ownerFeatureEnabled && roomOwnerId === user?.id);
@@ -1577,6 +1633,8 @@ export default function App() {
 
   async function confirmPlayerInput(player) {
     const playerId = player.player_id;
+    if (!playerId) return;
+    if (confirmInFlightPlayerIdsRef.current.has(playerId)) return;
     const canEditBuyIn =
       localMockMode || playerId === user?.id || (ownerFeatureEnabled && roomOwnerId === user?.id);
     const canEditFinal =
@@ -1611,39 +1669,67 @@ export default function App() {
       return;
     }
 
-    if (localMockMode) {
-      setMockPlayers((prev) =>
-        prev.map((item) =>
-          item.player_id === playerId
-            ? {
-                ...item,
-                buy_in: topUpAmount == null ? item.buy_in : nextBuyIn,
-                final_chips: canEditFinal ? nextFinal : item.final_chips,
-              }
-            : item
-        )
+    confirmInFlightPlayerIdsRef.current.add(playerId);
+    setConfirmingPlayerIds((prev) => ({ ...prev, [playerId]: true }));
+    try {
+      if (localMockMode) {
+        setMockPlayers((prev) =>
+          prev.map((item) =>
+            item.player_id === playerId
+              ? {
+                  ...item,
+                  buy_in: topUpAmount == null ? item.buy_in : nextBuyIn,
+                  final_chips: canEditFinal ? nextFinal : item.final_chips,
+                }
+              : item
+          )
+        );
+        clearPlayerDrafts(playerId);
+        return;
+      }
+
+      const updatePayload = {};
+      if (topUpAmount != null) {
+        updatePayload.buy_in = nextBuyIn;
+      }
+      if (canEditFinal) {
+        updatePayload.final_chips = nextFinal == null ? null : toNonNegativeChipInt(nextFinal);
+      }
+      if (!Object.keys(updatePayload).length) return;
+
+      const { error } = await supabase
+        .from('room_players')
+        .update(updatePayload)
+        .eq('room_id', joinedRoomId)
+        .eq('player_id', playerId);
+      if (error) throw error;
+
+      // Optimistic local sync so total buy-in/final chips update immediately
+      setPlayers((prev) =>
+        prev.map((item) => {
+          if (item.player_id !== playerId) return item;
+          return {
+            ...item,
+            ...(Object.prototype.hasOwnProperty.call(updatePayload, 'buy_in')
+              ? { buy_in: toNonNegativeChipInt(updatePayload.buy_in) }
+              : null),
+            ...(Object.prototype.hasOwnProperty.call(updatePayload, 'final_chips')
+              ? { final_chips: updatePayload.final_chips == null ? null : toNonNegativeChipInt(updatePayload.final_chips) }
+              : null),
+          };
+        })
       );
+
       clearPlayerDrafts(playerId);
-      return;
+    } finally {
+      confirmInFlightPlayerIdsRef.current.delete(playerId);
+      setConfirmingPlayerIds((prev) => {
+        if (!prev[playerId]) return prev;
+        const next = { ...prev };
+        delete next[playerId];
+        return next;
+      });
     }
-
-    const updatePayload = {};
-    if (topUpAmount != null) {
-      updatePayload.buy_in = nextBuyIn;
-    }
-    if (canEditFinal) {
-      updatePayload.final_chips = nextFinal == null ? null : toNonNegativeChipInt(nextFinal);
-    }
-    if (!Object.keys(updatePayload).length) return;
-
-    const { error } = await supabase
-      .from('room_players')
-      .update(updatePayload)
-      .eq('room_id', joinedRoomId)
-      .eq('player_id', playerId);
-    if (error) throw error;
-
-    clearPlayerDrafts(playerId);
   }
 
   async function settleSession() {
@@ -1980,12 +2066,17 @@ export default function App() {
 
   async function signOut() {
     await supabase.auth.signOut();
+    if (user?.id) {
+      clearPersistedJoinedRoom(user.id);
+    }
     setJoinedRoomId('');
     setLocalMockMode(false);
     setMockPlayers([]);
     setPlayers([]);
     setBuyInDrafts({});
     setFinalChipsDrafts({});
+    confirmInFlightPlayerIdsRef.current.clear();
+    setConfirmingPlayerIds({});
     setTransfers([]);
     setRoomOwnerId('');
     setRmbPer2000(DEFAULT_RMB_PER_2000);
@@ -2029,11 +2120,14 @@ export default function App() {
       roomChannelRef.current = null;
     }
     setJoinedRoomId('');
+    persistJoinedRoomForCurrentUser('');
     setLocalMockMode(false);
     setMockPlayers([]);
     setPlayers([]);
     setBuyInDrafts({});
     setFinalChipsDrafts({});
+    confirmInFlightPlayerIdsRef.current.clear();
+    setConfirmingPlayerIds({});
     setTransfers([]);
     setRoomStatus('active');
     setRoomOwnerId('');
@@ -2097,9 +2191,20 @@ export default function App() {
       if (!hasSupabaseConfig || !user) return;
       try {
         await ensureProfile(user);
+        await loadProfileDirectory();
+        await loadOpenRooms();
+        const persistedRoomId = loadPersistedJoinedRoom(user.id, null);
+        if (persistedRoomId) {
+          try {
+            await joinExistingRoom(persistedRoomId);
+          } catch (err) {
+            clearPersistedJoinedRoom(user.id, null);
+            setJoinedRoomId('');
+            showNotice(err.message || '已清理失效房间状态，请重新进入房间', 'error');
+          }
+        }
         await loadLeaderboard();
         await loadHistorySessions();
-        await loadOpenRooms();
         await loadGlobalStats();
       } catch (err) {
         showNotice(err.message, 'error');
@@ -2557,6 +2662,73 @@ export default function App() {
             </button>
           </div>
 
+          {hasJoinedRoom && amRoomOwner && roomStatus !== 'settled' && !showMineOnly && (
+            <div className="mb-3 rounded-2xl border border-slate-200 bg-white/85 p-3">
+              <div className="relative mt-0 flex flex-col gap-2 sm:flex-row sm:items-start">
+                <div className="relative w-full sm:max-w-xs">
+                  <input
+                    className="field-input w-full"
+                    placeholder="输入玩家昵称并添加"
+                    value={addPlayerNickname}
+                    onFocus={() => setAddPlayerFocus(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setAddPlayerFocus(false), 120);
+                    }}
+                    onChange={(e) => {
+                      setAddPlayerNickname(e.target.value);
+                      setAddPlayerFocus(true);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const first = addPlayerSuggestions[0];
+                        addPlayerToRoom(first || null).catch((err) => showNotice(err.message, 'error'));
+                      }
+                    }}
+                  />
+                  {addPlayerFocus && addPlayerSuggestions.length > 0 && (
+                    <div className="absolute z-20 mt-1 w-full rounded-xl border border-slate-200 bg-white/95 p-1 shadow-lg backdrop-blur-md">
+                      {addPlayerSuggestions.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="w-full rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setAddPlayerNickname(item.nickname);
+                            addPlayerToRoom(item).catch((err) => showNotice(err.message, 'error'));
+                          }}
+                        >
+                          {item.nickname}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="btn-secondary whitespace-nowrap"
+                  disabled={isAddingPlayer}
+                  onClick={async () => {
+                    try {
+                      await addPlayerToRoom();
+                    } catch (err) {
+                      showNotice(err.message, 'error');
+                    }
+                  }}
+                >
+                  {isAddingPlayer ? (
+                    <span className="inline-flex items-center gap-2">
+                      <LoadingSpinner className="h-4 w-4" />
+                      添加中
+                    </span>
+                  ) : (
+                    '添加玩家'
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div
             className={
               showMineOnly
@@ -2570,6 +2742,9 @@ export default function App() {
             const canEditBuyIn = localMockMode || mine || isOwner;
             const canEditFinal = localMockMode || mine || isOwner;
             const canConfirm = canEditBuyIn || canEditFinal;
+            const canKick = hasJoinedRoom && amRoomOwner && !mine && p.player_id !== roomOwnerId && roomStatus !== 'settled';
+            const isKicking = kickingPlayerId === p.player_id;
+            const isConfirming = Boolean(confirmingPlayerIds[p.player_id]);
             const buyDraft = buyInDrafts[p.player_id];
             const finalDraft = finalChipsDrafts[p.player_id];
             const displayBuyIn = buyDraft ?? '';
@@ -2596,8 +2771,32 @@ export default function App() {
                   )}
                   {mine ? '（我）' : ''}
                 </div>
+                {canKick && (
+                  <div className="mb-2">
+                    <button
+                      type="button"
+                      className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                      disabled={isKicking}
+                      onClick={async () => {
+                        try {
+                          await removePlayerFromRoom(p);
+                        } catch (err) {
+                          showNotice(err.message, 'error');
+                        }
+                      }}
+                    >
+                      {isKicking ? '移除中...' : '移除玩家'}
+                    </button>
+                  </div>
+                )}
                 <p className="mb-2 text-xs font-medium text-slate-500">
-                  累计总买入：<span className="font-semibold text-slate-700">{toChips(p.buy_in)}</span> 积分
+                  累计总买入：
+                  <AnimatedNumber
+                    className="ml-1 font-semibold text-slate-700"
+                    value={toNonNegativeChipInt(p.buy_in)}
+                    format={(n) => toChips(n)}
+                  />{' '}
+                  积分
                 </p>
 
                 <label className="block">
@@ -2676,6 +2875,7 @@ export default function App() {
                 {canConfirm && (
                   <button
                     className="btn-secondary mt-2 w-full border-slate-300 bg-white text-slate-800"
+                    disabled={isConfirming}
                     onClick={async () => {
                       try {
                         await confirmPlayerInput(p);
@@ -2684,7 +2884,14 @@ export default function App() {
                       }
                     }}
                   >
-                    确定
+                    {isConfirming ? (
+                      <span className="inline-flex items-center gap-2">
+                        <LoadingSpinner className="h-4 w-4" />
+                        确认中
+                      </span>
+                    ) : (
+                      '确定'
+                    )}
                   </button>
                 )}
 
@@ -2710,7 +2917,11 @@ export default function App() {
         </div>
 
         <div className="mt-3 rounded-2xl border border-slate-200 bg-white/90 p-3.5 text-sm text-slate-700 sm:p-4">
-          总买入：<b className="num">{toChips(totalBuyIn)}</b> | 总最终积分：<b className="num">{toChips(totalFinal)}</b>
+          总买入：
+          <b className="num">
+            <AnimatedNumber value={toNonNegativeChipInt(totalBuyIn)} format={(n) => toChips(n)} />
+          </b>{' '}
+          | 总最终积分：<b className="num">{toChips(totalFinal)}</b>
         </div>
 
         {hasJoinedRoom && amRoomOwner && (
@@ -2794,7 +3005,7 @@ export default function App() {
             className={`${leaderboardView === 'efficiency' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[106px] whitespace-nowrap`}
             onClick={() => setLeaderboardView('efficiency')}
           >
-            场均盈利
+            场均金额
           </button>
           <button
             className={`${leaderboardView === 'amount' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
@@ -2817,26 +3028,26 @@ export default function App() {
           {visibleLeaderboard.map((p, idx) => {
             const mine = p.playerId === user.id;
             const expanded = expandedLeaderboardId === p.playerId;
-            const metricValue =
-              leaderboardView === 'profit'
-                ? toChips(p.totalProfit)
-                : leaderboardView === 'roi'
-                  ? `${p.roi > 0 ? '+' : ''}${p.roi.toFixed(1)}%`
-                  : leaderboardView === 'amount'
-                    ? toRmb(p.amountRmb)
+              const metricValue =
+                leaderboardView === 'profit'
+                  ? toChips(p.totalProfit)
+                  : leaderboardView === 'roi'
+                    ? `${p.roi > 0 ? '+' : ''}${p.roi.toFixed(1)}%`
+                    : leaderboardView === 'amount'
+                      ? toRmb(p.amountRmb)
                     : leaderboardView === 'winRate'
                       ? `${p.winRate > 0 ? '+' : ''}${p.winRate.toFixed(1)}%`
-                      : toChips(p.avgProfitPerSession);
-            const metricIsPositive =
-              leaderboardView === 'profit'
-                ? p.totalProfit >= 0
-                : leaderboardView === 'roi'
-                  ? p.roi >= 0
-                  : leaderboardView === 'amount'
-                    ? p.amountRmb >= 0
+                      : toRmb(p.avgAmountPerSession);
+              const metricIsPositive =
+                leaderboardView === 'profit'
+                  ? p.totalProfit >= 0
+                  : leaderboardView === 'roi'
+                    ? p.roi >= 0
+                    : leaderboardView === 'amount'
+                      ? p.amountRmb >= 0
                     : leaderboardView === 'winRate'
                       ? p.winRate >= 0
-                      : p.avgProfitPerSession >= 0;
+                      : p.avgAmountPerSession >= 0;
             return (
               <article
                 key={p.playerId}
@@ -2905,9 +3116,9 @@ export default function App() {
                       </p>
                     </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">
-                      <p>场均盈利</p>
-                      <p className={`mt-0.5 font-semibold ${p.avgProfitPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {toChips(p.avgProfitPerSession)}
+                      <p>场均盈利金额</p>
+                      <p className={`mt-0.5 font-semibold ${p.avgAmountPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {toRmb(p.avgAmountPerSession)}
                       </p>
                     </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">

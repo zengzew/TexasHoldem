@@ -1,4 +1,4 @@
-# 数据库文档（Supabase, v2.1.3）
+# 数据库文档（Supabase, v2.1.5）
 
 ## 1. 初始化
 
@@ -59,6 +59,11 @@
 - `is_room_owner(text)`
 - `can_settle_room(text)`
 
+`v2.1.5` 关键策略调整：
+- `room_players` 写策略已升级为 `own_or_owner`
+  - 玩家可写自己
+  - 房主可写房间内所有玩家（用于添加/移除/修正）
+
 ## 5. Realtime 开关
 
 在 Supabase Realtime 页面启用：
@@ -86,3 +91,17 @@
 3. `duplicate key ... idx_profiles_nickname_ci_unique`
 - 原因：昵称重复（忽略大小写）
 - 处理：更换昵称，或清理重复数据后重试
+
+4. 房主添加玩家时报 RLS 拒绝
+- 原因：未应用 v2.1.5 `room_players insert own_or_owner` 策略
+- 处理：重新执行 `supabase_schema.sql`（推荐）或执行最小热修复 SQL：
+
+```sql
+drop policy if exists "room players insert own" on public.room_players;
+drop policy if exists "room players insert own_or_owner" on public.room_players;
+create policy "room players insert own_or_owner" on public.room_players
+on public.room_players
+for insert
+to authenticated
+with check (auth.uid() = player_id or public.is_room_owner(room_id));
+```

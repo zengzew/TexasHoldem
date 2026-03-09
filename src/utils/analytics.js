@@ -101,12 +101,14 @@ export function aggregateLeaderboardRows(rows) {
   return Array.from(agg.values()).map((row) => {
     const roi = row.totalBuyIn ? (row.totalProfit / row.totalBuyIn) * 100 : 0;
     const winRate = row.totalSessions ? (row.winningGames / row.totalSessions) * 100 : 0;
+    const avgAmountPerSession = row.totalSessions ? row.amountRmb / row.totalSessions : 0;
     return {
       ...row,
       totalBuyIn: Math.round(row.totalBuyIn),
       totalProfit: Math.round(row.totalProfit),
       amountRmb: Number(row.amountRmb.toFixed(2)),
       avgProfitPerSession: row.totalSessions ? Math.round(row.totalProfit / row.totalSessions) : 0,
+      avgAmountPerSession: Number(avgAmountPerSession.toFixed(2)),
       roi: Number(roi.toFixed(1)),
       winRate: Number(winRate.toFixed(1)),
     };
@@ -119,7 +121,7 @@ export function sortLeaderboardRows(rows, metric = 'profit') {
   const sorters = {
     profit: (a, b) => b.totalProfit - a.totalProfit || b.totalSessions - a.totalSessions,
     roi: (a, b) => b.roi - a.roi || b.totalProfit - a.totalProfit,
-    efficiency: (a, b) => b.avgProfitPerSession - a.avgProfitPerSession || b.totalProfit - a.totalProfit,
+    efficiency: (a, b) => b.avgAmountPerSession - a.avgAmountPerSession || b.amountRmb - a.amountRmb,
     amount: (a, b) => b.amountRmb - a.amountRmb || b.totalProfit - a.totalProfit,
     winRate: (a, b) => b.winRate - a.winRate || b.totalProfit - a.totalProfit,
   };

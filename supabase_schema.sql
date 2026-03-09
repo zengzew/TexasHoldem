@@ -357,9 +357,10 @@ for select to authenticated
 using (true);
 
 drop policy if exists "room players insert own" on public.room_players;
-create policy "room players insert own" on public.room_players
+drop policy if exists "room players insert own_or_owner" on public.room_players;
+create policy "room players insert own_or_owner" on public.room_players
 for insert to authenticated
-with check (auth.uid() = player_id);
+with check (auth.uid() = player_id or public.is_room_owner(room_id));
 
 drop policy if exists "room players update own" on public.room_players;
 drop policy if exists "room players update own_or_owner" on public.room_players;

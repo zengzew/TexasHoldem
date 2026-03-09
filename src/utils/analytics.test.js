@@ -44,12 +44,40 @@ describe('analytics utils', () => {
 
   it('supports sort metric amount and winRate', () => {
     const rows = [
-      { playerId: 'a', totalProfit: 100, totalSessions: 2, winRate: 40, amountRmb: 50, roi: 10, avgProfitPerSession: 50 },
-      { playerId: 'b', totalProfit: 50, totalSessions: 3, winRate: 85, amountRmb: 20, roi: 8, avgProfitPerSession: 17 },
-      { playerId: 'c', totalProfit: 10, totalSessions: 1, winRate: 20, amountRmb: 99, roi: 2, avgProfitPerSession: 10 },
+      {
+        playerId: 'a',
+        totalProfit: 100,
+        totalSessions: 2,
+        winRate: 40,
+        amountRmb: 50,
+        roi: 10,
+        avgProfitPerSession: 50,
+        avgAmountPerSession: 25,
+      },
+      {
+        playerId: 'b',
+        totalProfit: 50,
+        totalSessions: 3,
+        winRate: 85,
+        amountRmb: 20,
+        roi: 8,
+        avgProfitPerSession: 17,
+        avgAmountPerSession: 6.7,
+      },
+      {
+        playerId: 'c',
+        totalProfit: 10,
+        totalSessions: 1,
+        winRate: 20,
+        amountRmb: 99,
+        roi: 2,
+        avgProfitPerSession: 10,
+        avgAmountPerSession: 99,
+      },
     ];
 
     expect(sortLeaderboardRows(rows, 'amount').map((row) => row.playerId)).toEqual(['c', 'a', 'b']);
     expect(sortLeaderboardRows(rows, 'winRate').map((row) => row.playerId)).toEqual(['b', 'a', 'c']);
+    expect(sortLeaderboardRows(rows, 'efficiency').map((row) => row.playerId)).toEqual(['c', 'a', 'b']);
   });
 });

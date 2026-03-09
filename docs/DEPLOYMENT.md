@@ -1,4 +1,4 @@
-# 部署文档（Vercel + Supabase, v2.1.3）
+# 部署文档（Vercel + Supabase, v2.1.5）
 
 ## 1. 前置准备
 
@@ -20,9 +20,11 @@
 ## 3. 本地发布前检查
 
 ```bash
-npm test -- --run
+npm test
 npm run build
 ```
+
+> 若生产库版本较旧，请先在 Supabase SQL Editor 执行最新 `supabase_schema.sql`，确保 `room_players` 的 `own_or_owner` 策略已生效。
 
 ## 4. 发布命令
 
