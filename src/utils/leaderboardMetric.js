@@ -1,0 +1,57 @@
+function safeNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatSignedPercent(value) {
+  const amount = safeNumber(value);
+  return `${amount > 0 ? '+' : ''}${amount.toFixed(1)}%`;
+}
+
+function formatRmb(value) {
+  const amount = safeNumber(value);
+  const absText = Math.abs(amount).toFixed(2);
+  return `${amount < 0 ? '-' : ''}¥${absText}`;
+}
+
+function formatChips(value) {
+  return String(Math.round(safeNumber(value)));
+}
+
+export function getLeaderboardMetric(row, metric = 'profit') {
+  const totalProfit = safeNumber(row?.totalProfit);
+  const roi = safeNumber(row?.roi);
+  const amountRmb = safeNumber(row?.amountRmb);
+  const winRate = safeNumber(row?.winRate);
+  const avgAmountPerSession = safeNumber(row?.avgAmountPerSession);
+
+  switch (metric) {
+    case 'roi':
+      return {
+        text: formatSignedPercent(roi),
+        isPositive: roi >= 0,
+      };
+    case 'amount':
+      return {
+        text: formatRmb(amountRmb),
+        isPositive: amountRmb >= 0,
+      };
+    case 'winRate':
+      return {
+        text: formatSignedPercent(winRate),
+        isPositive: winRate >= 0,
+      };
+    case 'efficiency':
+      return {
+        text: formatRmb(avgAmountPerSession),
+        isPositive: avgAmountPerSession >= 0,
+      };
+    case 'profit':
+    default:
+      return {
+        text: formatChips(totalProfit),
+        isPositive: totalProfit >= 0,
+      };
+  }
+}
+

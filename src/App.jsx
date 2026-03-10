@@ -3,7 +3,9 @@ import { hasSupabaseConfig, supabase } from './supabase';
 import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
+import { getLeaderboardMetric } from './utils/leaderboardMetric';
 import { clearPersistedJoinedRoom, loadPersistedJoinedRoom, savePersistedJoinedRoom } from './utils/roomState';
+import { buildLeftMatchSuggestions, findBestProfileForAdd } from './utils/playerSearch';
 import ownerCrownIcon from './assets/owner-crown.svg';
 import chevronDownIcon from './assets/chevron-down.svg';
 import medalGoldIcon from './assets/medal-gold.svg';
@@ -279,6 +281,8 @@ export default function App() {
   const [confirmingPlayerIds, setConfirmingPlayerIds] = useState({});
   const [profileDirectory, setProfileDirectory] = useState([]);
   const [addPlayerFocus, setAddPlayerFocus] = useState(false);
+  const [addPlayerRemoteSuggestions, setAddPlayerRemoteSuggestions] = useState([]);
+  const [isSearchingPlayers, setIsSearchingPlayers] = useState(false);
   const startDateNativeRef = useRef(null);
   const endDateNativeRef = useRef(null);
 
@@ -575,6 +579,15 @@ export default function App() {
     () => (showAllLeaderboard ? rankedLeaderboard : rankedLeaderboard.slice(0, LEADERBOARD_COLLAPSED_COUNT)),
     [rankedLeaderboard, showAllLeaderboard, LEADERBOARD_COLLAPSED_COUNT]
   );
+  const leaderboardRenderKey = useMemo(
+    () =>
+      [
+        leaderboardView,
+        showAllLeaderboard ? 'all' : 'top',
+        visibleLeaderboard.map((item) => `${item.playerId}:${item.displayRank}`).join('|'),
+      ].join('::'),
+    [leaderboardView, showAllLeaderboard, visibleLeaderboard]
+  );
   const filteredHistorySessions = useMemo(
     () => historySessions,
     [historySessions]
@@ -587,18 +600,14 @@ export default function App() {
     const start = (historyPage - 1) * HISTORY_PAGE_SIZE;
     return filteredHistorySessions.slice(start, start + HISTORY_PAGE_SIZE);
   }, [filteredHistorySessions, historyPage]);
-  const addPlayerSuggestions = useMemo(() => {
-    const query = normalizeNickname(addPlayerNickname).toLowerCase();
-    if (!query) return [];
+  const localAddPlayerSuggestions = useMemo(() => {
     const existingPlayerIds = new Set(activePlayers.map((player) => player.player_id));
-    return profileDirectory
-      .filter((row) => {
-        const normalized = normalizeNickname(row.nickname).toLowerCase();
-        if (!normalized.startsWith(query)) return false;
-        return !existingPlayerIds.has(row.id);
-      })
-      .slice(0, 8);
+    return buildLeftMatchSuggestions(profileDirectory, addPlayerNickname, existingPlayerIds, 8);
   }, [addPlayerNickname, profileDirectory, activePlayers]);
+  const addPlayerSuggestions = useMemo(() => {
+    if (addPlayerRemoteSuggestions.length) return addPlayerRemoteSuggestions;
+    return localAddPlayerSuggestions;
+  }, [addPlayerRemoteSuggestions, localAddPlayerSuggestions]);
 
   function nicknameToEmail(rawNickname) {
     const normalized = normalizeNickname(rawNickname).toLowerCase();
@@ -802,7 +811,37 @@ export default function App() {
   async function loadProfileDirectory() {
     const { data, error } = await supabase.from('profiles').select('id,nickname').limit(5000);
     if (error) throw error;
-    setProfileDirectory(data || []);
+    const nextProfiles = data || [];
+    setProfileDirectory(nextProfiles);
+    return nextProfiles;
+  }
+
+  async function searchProfilesByPrefix(rawInput) {
+    if (!hasSupabaseConfig || !user) return;
+    const q = normalizeNickname(rawInput);
+    if (!q) {
+      setAddPlayerRemoteSuggestions([]);
+      return;
+    }
+    const existingPlayerIds = new Set(activePlayers.map((player) => player.player_id));
+    const localMatches = buildLeftMatchSuggestions(profileDirectory, q, existingPlayerIds, 8);
+    setAddPlayerRemoteSuggestions(localMatches);
+
+    if (localMatches.length > 0 && profileDirectory.length > 0) {
+      setIsSearchingPlayers(false);
+      return;
+    }
+
+    setIsSearchingPlayers(true);
+    try {
+      const latestProfiles = await loadProfileDirectory();
+      const filtered = buildLeftMatchSuggestions(latestProfiles, q, existingPlayerIds, 8);
+      setAddPlayerRemoteSuggestions(filtered);
+    } catch {
+      setAddPlayerRemoteSuggestions(localMatches);
+    } finally {
+      setIsSearchingPlayers(false);
+    }
   }
 
   async function loadOpenRooms() {
@@ -1383,27 +1422,21 @@ export default function App() {
       return;
     }
 
-    const nickname = normalizeNickname(targetProfile?.nickname || addPlayerNickname);
-    if (!nickname) {
+    const typedNickname = normalizeNickname(targetProfile?.nickname || addPlayerNickname);
+    if (!typedNickname) {
       showNotice('请输入要添加的玩家昵称', 'error');
       return;
     }
 
     setIsAddingPlayer(true);
     try {
-      let targetPlayer = targetProfile;
-      if (!targetPlayer) {
-        targetPlayer = profileDirectory.find(
-          (row) => normalizeNickname(row.nickname).toLowerCase() === nickname.toLowerCase()
-        );
-      }
+      const existingPlayerIds = new Set(activePlayers.map((player) => player.player_id));
+      let targetPlayer = targetProfile || findBestProfileForAdd(profileDirectory, typedNickname, existingPlayerIds);
       if (!targetPlayer) {
         const { data: profileRows, error: profileErr } = await supabase.from('profiles').select('id,nickname').limit(5000);
         if (profileErr) throw profileErr;
         setProfileDirectory(profileRows || []);
-        targetPlayer = (profileRows || []).find(
-        (row) => normalizeNickname(row.nickname).toLowerCase() === nickname.toLowerCase()
-      );
+        targetPlayer = findBestProfileForAdd(profileRows || [], typedNickname, existingPlayerIds);
       }
       if (!targetPlayer) {
         throw createAppError('PLAYER_NOT_FOUND', '该昵称未注册，无法添加');
@@ -1425,6 +1458,7 @@ export default function App() {
 
       setAddPlayerNickname('');
       setAddPlayerFocus(false);
+      setAddPlayerRemoteSuggestions([]);
       showNotice(`已添加玩家 ${targetPlayer.nickname}`, 'success');
       await loadRoom(joinedRoomId);
       await loadOpenRooms();
@@ -2675,8 +2709,10 @@ export default function App() {
                       window.setTimeout(() => setAddPlayerFocus(false), 120);
                     }}
                     onChange={(e) => {
-                      setAddPlayerNickname(e.target.value);
+                      const raw = e.target.value;
+                      setAddPlayerNickname(raw);
                       setAddPlayerFocus(true);
+                      searchProfilesByPrefix(raw).catch(() => {});
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -2686,22 +2722,28 @@ export default function App() {
                       }
                     }}
                   />
-                  {addPlayerFocus && addPlayerSuggestions.length > 0 && (
+                  {addPlayerFocus && String(addPlayerNickname || '').trim() !== '' && (
                     <div className="absolute z-20 mt-1 w-full rounded-xl border border-slate-200 bg-white/95 p-1 shadow-lg backdrop-blur-md">
-                      {addPlayerSuggestions.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className="w-full rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setAddPlayerNickname(item.nickname);
-                            addPlayerToRoom(item).catch((err) => showNotice(err.message, 'error'));
-                          }}
-                        >
-                          {item.nickname}
-                        </button>
-                      ))}
+                      {addPlayerSuggestions.length > 0 ? (
+                        addPlayerSuggestions.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            className="w-full rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setAddPlayerNickname(item.nickname);
+                              addPlayerToRoom(item).catch((err) => showNotice(err.message, 'error'));
+                            }}
+                          >
+                            {item.nickname}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-2.5 py-2 text-sm text-slate-500">
+                          {isSearchingPlayers ? '搜索中...' : '未找到可添加玩家'}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2763,19 +2805,19 @@ export default function App() {
                 } ${showMineOnly ? '' : 'w-[95%] max-w-[38rem] shrink-0 snap-center sm:w-[90%]'}`}
               >
                 <div className="mb-2.5 flex items-center gap-1.5 break-all text-base font-semibold text-slate-900">
-                  {p.nickname}
-                  {ownerFeatureEnabled && p.player_id === roomOwnerId && (
-                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5">
-                      <OwnerCrown className="h-5 w-5" />
-                    </span>
-                  )}
-                  {mine ? '（我）' : ''}
-                </div>
-                {canKick && (
-                  <div className="mb-2">
+                  <div className="min-w-0 flex-1">
+                    {p.nickname}
+                    {ownerFeatureEnabled && p.player_id === roomOwnerId && (
+                      <span className="ml-1 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5">
+                        <OwnerCrown className="h-5 w-5" />
+                      </span>
+                    )}
+                    {mine ? '（我）' : ''}
+                  </div>
+                  {canKick && (
                     <button
                       type="button"
-                      className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                      className="ml-auto shrink-0 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
                       disabled={isKicking}
                       onClick={async () => {
                         try {
@@ -2787,8 +2829,8 @@ export default function App() {
                     >
                       {isKicking ? '移除中...' : '移除玩家'}
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
                 <p className="mb-2 text-xs font-medium text-slate-500">
                   累计总买入：
                   <AnimatedNumber
@@ -2921,7 +2963,10 @@ export default function App() {
           <b className="num">
             <AnimatedNumber value={toNonNegativeChipInt(totalBuyIn)} format={(n) => toChips(n)} />
           </b>{' '}
-          | 总最终积分：<b className="num">{toChips(totalFinal)}</b>
+          | 总最终积分：
+          <b className="num">
+            <AnimatedNumber value={toNonNegativeChipInt(totalFinal)} format={(n) => toChips(n)} />
+          </b>
         </div>
 
         {hasJoinedRoom && amRoomOwner && (
@@ -3021,40 +3066,20 @@ export default function App() {
           </button>
           </div>
         </div>
-          <div className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
+          <div key={leaderboardRenderKey} className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
           {!visibleLeaderboard.length && (
             <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">暂无数据</div>
           )}
-          {visibleLeaderboard.map((p, idx) => {
+          {visibleLeaderboard.map((p) => {
             const mine = p.playerId === user.id;
             const expanded = expandedLeaderboardId === p.playerId;
-              const metricValue =
-                leaderboardView === 'profit'
-                  ? toChips(p.totalProfit)
-                  : leaderboardView === 'roi'
-                    ? `${p.roi > 0 ? '+' : ''}${p.roi.toFixed(1)}%`
-                    : leaderboardView === 'amount'
-                      ? toRmb(p.amountRmb)
-                    : leaderboardView === 'winRate'
-                      ? `${p.winRate > 0 ? '+' : ''}${p.winRate.toFixed(1)}%`
-                      : toRmb(p.avgAmountPerSession);
-              const metricIsPositive =
-                leaderboardView === 'profit'
-                  ? p.totalProfit >= 0
-                  : leaderboardView === 'roi'
-                    ? p.roi >= 0
-                    : leaderboardView === 'amount'
-                      ? p.amountRmb >= 0
-                    : leaderboardView === 'winRate'
-                      ? p.winRate >= 0
-                      : p.avgAmountPerSession >= 0;
+            const metric = getLeaderboardMetric(p, leaderboardView);
             return (
               <article
-                key={p.playerId}
-                className={`stagger-item rounded-2xl border bg-white/90 p-3.5 ${
+                key={`${leaderboardView}-${p.playerId}-${p.displayRank}`}
+                className={`rounded-2xl border bg-white/90 p-3.5 ${
                   mine ? 'border-sky-300 ring-2 ring-sky-100' : 'border-slate-200'
                 }`}
-                style={{ animationDelay: `${Math.min(idx, 8) * 45}ms` }}
               >
                 <button
                   type="button"
@@ -3085,9 +3110,9 @@ export default function App() {
                     </div>
                     <div className="w-[6.5rem] text-right sm:w-28">
                       <p
-                        className={`whitespace-nowrap text-lg font-semibold tabular-nums ${metricIsPositive ? 'text-emerald-600' : 'text-rose-600'}`}
+                        className={`whitespace-nowrap text-lg font-semibold tabular-nums ${metric.isPositive ? 'text-emerald-600' : 'text-rose-600'}`}
                       >
-                        {metricValue}
+                        {metric.text}
                       </p>
                     </div>
                     <div className="flex justify-end">
