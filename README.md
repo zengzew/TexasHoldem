@@ -1,4 +1,4 @@
-# TEXAS HOLD'EM SCORE v2.1.5
+# TEXAS HOLD'EM SCORE v2.1.6
 
 React + Supabase 的德州扑克聚会积分系统（Web）。
 
@@ -26,6 +26,13 @@ React + Supabase 的德州扑克聚会积分系统（Web）。
 - `Tailwind CSS 3` + 自定义组件样式
 - `Supabase (Auth + Postgres + Realtime + RLS)`
 - `Vitest`
+
+## 首屏性能策略
+
+- 首屏优先渲染页面壳与当前房间
+- 积分榜与历史记录改为按 Tab 首次访问时懒加载
+- 房主玩家搜索目录延后到“全部玩家”视图聚焦搜索时再加载
+- 房间恢复链路去掉重复请求，避免刷新后首屏阻塞
 
 ## 3. 环境要求
 
@@ -97,7 +104,7 @@ npx vercel --prod --yes
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-## 11. v2.1.5 备注
+## 11. v2.1.6 备注
 
 - 当前版本已移除 `admin` 相关功能与 SQL
 - 权限以房主机制 + RLS 为主
@@ -109,3 +116,4 @@ npx vercel --prod --yes
 - 场均指标改为“场均金额（RMB）”
 - 刷新页面将优先恢复用户上次已加入房间（失效房间会自动清理缓存）
 - “累计总买入 / 总买入”已加入数字过渡动画
+- 首屏改为“当前房间优先”加载，积分榜 / 历史记录 / 玩家目录均按需加载

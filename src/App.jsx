@@ -4,6 +4,12 @@ import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
 import { getLeaderboardMetric } from './utils/leaderboardMetric';
+import {
+  deriveInitialLoadPlan,
+  deriveInvalidationPlan,
+  shouldLoadPlayerDirectory,
+  shouldLoadTabData,
+} from './utils/firstLoadPolicy';
 import { clearPersistedJoinedRoom, loadPersistedJoinedRoom, savePersistedJoinedRoom } from './utils/roomState';
 import { buildLeftMatchSuggestions, findBestProfileForAdd } from './utils/playerSearch';
 import ownerCrownIcon from './assets/owner-crown.svg';
@@ -260,10 +266,13 @@ export default function App() {
   const [leaderboardView, setLeaderboardView] = useState('profit');
   const [expandedLeaderboardId, setExpandedLeaderboardId] = useState('');
   const [showAllLeaderboard, setShowAllLeaderboard] = useState(false);
+  const [leaderboardLoaded, setLeaderboardLoaded] = useState(false);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [historySessions, setHistorySessions] = useState([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState('');
   const [historyPage, setHistoryPage] = useState(1);
-  const [globalStats, setGlobalStats] = useState({ settledSessions: 0, rooms: 0 });
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [datePreset, setDatePreset] = useState('all');
   const [customStartDate, setCustomStartDate] = useState(defaultStartDate);
   const [customEndDate, setCustomEndDate] = useState(defaultEndDate);
@@ -280,6 +289,8 @@ export default function App() {
   const [kickingPlayerId, setKickingPlayerId] = useState('');
   const [confirmingPlayerIds, setConfirmingPlayerIds] = useState({});
   const [profileDirectory, setProfileDirectory] = useState([]);
+  const [profileDirectoryLoaded, setProfileDirectoryLoaded] = useState(false);
+  const [profileDirectoryLoading, setProfileDirectoryLoading] = useState(false);
   const [addPlayerFocus, setAddPlayerFocus] = useState(false);
   const [addPlayerRemoteSuggestions, setAddPlayerRemoteSuggestions] = useState([]);
   const [isSearchingPlayers, setIsSearchingPlayers] = useState(false);
@@ -287,6 +298,12 @@ export default function App() {
   const endDateNativeRef = useRef(null);
 
   const roomChannelRef = useRef(null);
+  const leaderboardLoadPromiseRef = useRef(null);
+  const historyLoadPromiseRef = useRef(null);
+  const profileDirectoryLoadPromiseRef = useRef(null);
+  const activeTabRef = useRef(activeTab);
+  const leaderboardLoadedRef = useRef(false);
+  const historyLoadedRef = useRef(false);
   const settleInFlightRef = useRef(false);
   const confirmInFlightPlayerIdsRef = useRef(new Set());
   const actionLockRef = useRef(false);
@@ -608,6 +625,15 @@ export default function App() {
     if (addPlayerRemoteSuggestions.length) return addPlayerRemoteSuggestions;
     return localAddPlayerSuggestions;
   }, [addPlayerRemoteSuggestions, localAddPlayerSuggestions]);
+  const totalBuyIn = activePlayers.reduce((acc, p) => acc + Number(p.buy_in || 0), 0);
+  const totalFinal = activePlayers.reduce((acc, p) => acc + Number(p.final_chips || 0), 0);
+  const hasJoinedRoom = Boolean(joinedRoomId);
+  const amRoomOwner = hasJoinedRoom && (!ownerFeatureEnabled || roomOwnerId === user.id);
+  const roomOwnerName = roomOwnerId ? nameById.get(roomOwnerId) || 'Unknown' : '-';
+  const visiblePlayers = showMineOnly ? sortedPlayers.filter((p) => p.player_id === user.id) : sortedPlayers;
+  activeTabRef.current = activeTab;
+  leaderboardLoadedRef.current = leaderboardLoaded;
+  historyLoadedRef.current = historyLoaded;
 
   function nicknameToEmail(rawNickname) {
     const normalized = normalizeNickname(rawNickname).toLowerCase();
@@ -752,68 +778,114 @@ export default function App() {
     setNewNickname(resolvedName);
   }
 
-  async function loadLeaderboard() {
-    const { data: rows, error: rowsErr } = await supabase
-      .from('session_players')
-      .select('session_id,player_id,buy_in,net_result')
-      .limit(20000);
-    if (rowsErr) throw rowsErr;
-
-    const sessionIds = [...new Set((rows || []).map((row) => row.session_id).filter(Boolean))];
-    if (!sessionIds.length || !(rows || []).length) {
-      setLeaderboardRows([]);
-      return;
+  function invalidateLazyData(options = {}) {
+    if (options.leaderboard) {
+      setLeaderboardLoaded(false);
     }
-
-    const { data: sessions, error: sessionsErr } = await supabase
-      .from('sessions')
-      .select('id,created_at,rmb_per_2000')
-      .in('id', sessionIds);
-    if (sessionsErr) throw sessionsErr;
-
-    const sessionMeta = new Map(
-      (sessions || []).map((row) => [
-        row.id,
-        {
-          createdAt: row.created_at,
-          rmbPer2000: Number(row.rmb_per_2000 || DEFAULT_RMB_PER_2000),
-        },
-      ])
-    );
-
-    const playerIds = [...new Set((rows || []).map((row) => row.player_id).filter(Boolean))];
-    let names = new Map();
-    if (playerIds.length) {
-      const { data: profiles, error: profileErr } = await supabase
-        .from('profiles')
-        .select('id,nickname,total_games,winning_games')
-        .in('id', playerIds);
-      if (profileErr) throw profileErr;
-      names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
+    if (options.history) {
+      setHistoryLoaded(false);
     }
-
-    const mapped = (rows || []).map((row) => {
-      const meta = sessionMeta.get(row.session_id) || {};
-      return {
-        sessionId: row.session_id,
-        playerId: row.player_id,
-        playerName: names.get(row.player_id) || 'Unknown',
-        buyIn: toNonNegativeChipInt(row.buy_in),
-        netResult: toChipInt(row.net_result),
-        createdAt: meta.createdAt || null,
-        rmbPer2000: Number(meta.rmbPer2000 || DEFAULT_RMB_PER_2000),
-      };
-    });
-
-    setLeaderboardRows(mapped);
+    if (options.profileDirectory) {
+      setProfileDirectoryLoaded(false);
+    }
   }
 
-  async function loadProfileDirectory() {
-    const { data, error } = await supabase.from('profiles').select('id,nickname').limit(5000);
-    if (error) throw error;
-    const nextProfiles = data || [];
-    setProfileDirectory(nextProfiles);
-    return nextProfiles;
+  async function loadLeaderboard(options = {}) {
+    const { force = false } = options;
+    if (!force && leaderboardLoaded) return leaderboardRows;
+    if (leaderboardLoadPromiseRef.current) return leaderboardLoadPromiseRef.current;
+
+    setLeaderboardLoading(true);
+    const request = (async () => {
+      const { data: rows, error: rowsErr } = await supabase
+        .from('session_players')
+        .select('session_id,player_id,buy_in,net_result')
+        .limit(20000);
+      if (rowsErr) throw rowsErr;
+
+      const sessionIds = [...new Set((rows || []).map((row) => row.session_id).filter(Boolean))];
+      if (!sessionIds.length || !(rows || []).length) {
+        setLeaderboardRows([]);
+        setLeaderboardLoaded(true);
+        return [];
+      }
+
+      const { data: sessions, error: sessionsErr } = await supabase
+        .from('sessions')
+        .select('id,created_at,rmb_per_2000')
+        .in('id', sessionIds);
+      if (sessionsErr) throw sessionsErr;
+
+      const sessionMeta = new Map(
+        (sessions || []).map((row) => [
+          row.id,
+          {
+            createdAt: row.created_at,
+            rmbPer2000: Number(row.rmb_per_2000 || DEFAULT_RMB_PER_2000),
+          },
+        ])
+      );
+
+      const playerIds = [...new Set((rows || []).map((row) => row.player_id).filter(Boolean))];
+      let names = new Map();
+      if (playerIds.length) {
+        const { data: profiles, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id,nickname,total_games,winning_games')
+          .in('id', playerIds);
+        if (profileErr) throw profileErr;
+        names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
+      }
+
+      const mapped = (rows || []).map((row) => {
+        const meta = sessionMeta.get(row.session_id) || {};
+        return {
+          sessionId: row.session_id,
+          playerId: row.player_id,
+          playerName: names.get(row.player_id) || 'Unknown',
+          buyIn: toNonNegativeChipInt(row.buy_in),
+          netResult: toChipInt(row.net_result),
+          createdAt: meta.createdAt || null,
+          rmbPer2000: Number(meta.rmbPer2000 || DEFAULT_RMB_PER_2000),
+        };
+      });
+
+      setLeaderboardRows(mapped);
+      setLeaderboardLoaded(true);
+      return mapped;
+    })();
+
+    leaderboardLoadPromiseRef.current = request;
+    try {
+      return await request;
+    } finally {
+      leaderboardLoadPromiseRef.current = null;
+      setLeaderboardLoading(false);
+    }
+  }
+
+  async function loadProfileDirectory(options = {}) {
+    const { force = false } = options;
+    if (!force && profileDirectoryLoaded) return profileDirectory;
+    if (profileDirectoryLoadPromiseRef.current) return profileDirectoryLoadPromiseRef.current;
+
+    setProfileDirectoryLoading(true);
+    const request = (async () => {
+      const { data, error } = await supabase.from('profiles').select('id,nickname').limit(5000);
+      if (error) throw error;
+      const nextProfiles = data || [];
+      setProfileDirectory(nextProfiles);
+      setProfileDirectoryLoaded(true);
+      return nextProfiles;
+    })();
+
+    profileDirectoryLoadPromiseRef.current = request;
+    try {
+      return await request;
+    } finally {
+      profileDirectoryLoadPromiseRef.current = null;
+      setProfileDirectoryLoading(false);
+    }
   }
 
   async function searchProfilesByPrefix(rawInput) {
@@ -827,7 +899,7 @@ export default function App() {
     const localMatches = buildLeftMatchSuggestions(profileDirectory, q, existingPlayerIds, 8);
     setAddPlayerRemoteSuggestions(localMatches);
 
-    if (localMatches.length > 0 && profileDirectory.length > 0) {
+    if (profileDirectoryLoaded) {
       setIsSearchingPlayers(false);
       return;
     }
@@ -929,175 +1001,218 @@ export default function App() {
     );
   }
 
-  async function loadGlobalStats() {
-    const [{ count: settledCount, error: settledErr }, { count: roomCount, error: roomErr }] =
-      await Promise.all([
-        supabase.from('sessions').select('id', { head: true, count: 'exact' }).eq('status', 'settled'),
-        supabase.from('sessions').select('id', { head: true, count: 'exact' }),
+  async function loadHistorySessions(options = {}) {
+    const { force = false } = options;
+    if (!force && historyLoaded) return historySessions;
+    if (historyLoadPromiseRef.current) return historyLoadPromiseRef.current;
+
+    setHistoryLoading(true);
+    const request = (async () => {
+      const [{ data: roomRows, error: roomErr }, { data: settledRows, error: settledErr }] = await Promise.all([
+        supabase.from('room_players').select('room_id').eq('player_id', user.id).limit(2000),
+        supabase.from('session_players').select('session_id').eq('player_id', user.id).limit(2000),
       ]);
+      if (roomErr) throw roomErr;
+      if (settledErr) throw settledErr;
 
-    if (settledErr) throw settledErr;
-    if (roomErr) throw roomErr;
+      const memberSessionIds = [...new Set([
+        ...(roomRows || []).map((row) => row.room_id),
+        ...(settledRows || []).map((row) => row.session_id),
+      ])];
+      if (!memberSessionIds.length) {
+        setHistorySessions([]);
+        setExpandedHistoryId('');
+        setHistoryPage(1);
+        setHistoryLoaded(true);
+        return [];
+      }
 
-    setGlobalStats({
-      settledSessions: settledCount || 0,
-      rooms: roomCount || 0,
-    });
-  }
-
-  async function loadHistorySessions() {
-    const [{ data: roomRows, error: roomErr }, { data: settledRows, error: settledErr }] = await Promise.all([
-      supabase.from('room_players').select('room_id').eq('player_id', user.id).limit(2000),
-      supabase.from('session_players').select('session_id').eq('player_id', user.id).limit(2000),
-    ]);
-    if (roomErr) throw roomErr;
-    if (settledErr) throw settledErr;
-
-    const memberSessionIds = [...new Set([
-      ...(roomRows || []).map((row) => row.room_id),
-      ...(settledRows || []).map((row) => row.session_id),
-    ])];
-    if (!memberSessionIds.length) {
-      setHistorySessions([]);
-      setExpandedHistoryId('');
-      setHistoryPage(1);
-      return;
-    }
-
-    let sessions = [];
-    if (ownerFeatureEnabled) {
-      const { data, error } = await supabase
-        .from('sessions')
-        .select('id,created_at,status,owner_id')
-        .in('id', memberSessionIds)
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (error) {
-        if (isMissingOwnerColumnError(error)) {
-          handleOwnerSchemaMissing();
-          const fallback = await supabase
-            .from('sessions')
-            .select('id,created_at,status')
-            .in('id', memberSessionIds)
-            .order('created_at', { ascending: false })
-            .limit(200);
-          if (fallback.error) throw fallback.error;
-          sessions = fallback.data || [];
+      let sessions = [];
+      if (ownerFeatureEnabled) {
+        const { data, error } = await supabase
+          .from('sessions')
+          .select('id,created_at,status,owner_id')
+          .in('id', memberSessionIds)
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (error) {
+          if (isMissingOwnerColumnError(error)) {
+            handleOwnerSchemaMissing();
+            const fallback = await supabase
+              .from('sessions')
+              .select('id,created_at,status')
+              .in('id', memberSessionIds)
+              .order('created_at', { ascending: false })
+              .limit(200);
+            if (fallback.error) throw fallback.error;
+            sessions = fallback.data || [];
+          } else {
+            throw error;
+          }
         } else {
-          throw error;
+          sessions = data || [];
         }
       } else {
+        const { data, error } = await supabase
+          .from('sessions')
+          .select('id,created_at,status')
+          .in('id', memberSessionIds)
+          .order('created_at', { ascending: false })
+          .limit(200);
+        if (error) throw error;
         sessions = data || [];
       }
-    } else {
-      const { data, error } = await supabase
-        .from('sessions')
-        .select('id,created_at,status')
-        .in('id', memberSessionIds)
-        .order('created_at', { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      sessions = data || [];
-    }
 
-    const sessionIds = sessions.map((s) => s.id);
-    if (!sessionIds.length) {
-      setHistorySessions([]);
-      setExpandedHistoryId('');
-      setHistoryPage(1);
-      return;
-    }
+      const sessionIds = sessions.map((s) => s.id);
+      if (!sessionIds.length) {
+        setHistorySessions([]);
+        setExpandedHistoryId('');
+        setHistoryPage(1);
+        setHistoryLoaded(true);
+        return [];
+      }
 
-    let rateBySession = new Map();
-    if (rmbRateFeatureEnabled) {
-      const { data: rateRows, error: rateErr } = await supabase
-        .from('sessions')
-        .select('id,rmb_per_2000')
-        .in('id', sessionIds);
-      if (rateErr) {
-        if (isMissingRmbRateColumnError(rateErr)) {
-          handleRmbSchemaMissing();
+      let rateBySession = new Map();
+      if (rmbRateFeatureEnabled) {
+        const { data: rateRows, error: rateErr } = await supabase
+          .from('sessions')
+          .select('id,rmb_per_2000')
+          .in('id', sessionIds);
+        if (rateErr) {
+          if (isMissingRmbRateColumnError(rateErr)) {
+            handleRmbSchemaMissing();
+          } else {
+            throw rateErr;
+          }
         } else {
-          throw rateErr;
+          rateBySession = new Map(
+            (rateRows || []).map((row) => [row.id, Number(row.rmb_per_2000 || DEFAULT_RMB_PER_2000)])
+          );
         }
-      } else {
-        rateBySession = new Map(
-          (rateRows || []).map((row) => [row.id, Number(row.rmb_per_2000 || DEFAULT_RMB_PER_2000)])
-        );
+      }
+
+      const { data: sessionPlayers, error: spErr } = await supabase
+        .from('session_players')
+        .select('session_id,player_id,buy_in,final_chips,net_result')
+        .in('session_id', sessionIds);
+      if (spErr) throw spErr;
+
+      const { data: transferRows, error: trErr } = await supabase
+        .from('transfers')
+        .select('session_id,from_player_id,to_player_id,amount')
+        .in('session_id', sessionIds)
+        .order('id', { ascending: true });
+      if (trErr) throw trErr;
+
+      const playerIds = new Set();
+      sessions.forEach((s) => {
+        if (s.owner_id) playerIds.add(s.owner_id);
+      });
+      (sessionPlayers || []).forEach((p) => playerIds.add(p.player_id));
+      (transferRows || []).forEach((t) => {
+        playerIds.add(t.from_player_id);
+        playerIds.add(t.to_player_id);
+      });
+
+      let names = new Map();
+      const ids = Array.from(playerIds);
+      if (ids.length) {
+        const { data: profiles, error: profileErr } = await supabase
+          .from('profiles')
+          .select('id,nickname')
+          .in('id', ids);
+        if (profileErr) throw profileErr;
+        names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
+      }
+
+      const playersBySession = new Map();
+      (sessionPlayers || []).forEach((row) => {
+        if (!playersBySession.has(row.session_id)) playersBySession.set(row.session_id, []);
+        playersBySession.get(row.session_id).push({
+          playerId: row.player_id,
+          nickname: names.get(row.player_id) || 'Unknown',
+          buyIn: toNonNegativeChipInt(row.buy_in),
+          finalChips: toNonNegativeChipInt(row.final_chips),
+          netResult: Math.round(Number(row.net_result || 0)),
+        });
+      });
+
+      const transfersBySession = new Map();
+      (transferRows || []).forEach((row) => {
+        if (!transfersBySession.has(row.session_id)) transfersBySession.set(row.session_id, []);
+        transfersBySession.get(row.session_id).push({
+          fromPlayerId: row.from_player_id,
+          toPlayerId: row.to_player_id,
+          fromName: names.get(row.from_player_id) || row.from_player_id,
+          toName: names.get(row.to_player_id) || row.to_player_id,
+          amount: toNonNegativeChipInt(row.amount),
+        });
+      });
+
+      const history = sessions.map((s) => ({
+        id: s.id,
+        createdAt: s.created_at,
+        status: s.status,
+        ownerId: ownerFeatureEnabled ? s.owner_id || '' : '',
+        ownerName: ownerFeatureEnabled && s.owner_id ? names.get(s.owner_id) || 'Unknown' : '-',
+        rmbPer2000: Number(rateBySession.get(s.id) ?? DEFAULT_RMB_PER_2000),
+        players: (playersBySession.get(s.id) || []).sort((a, b) => b.netResult - a.netResult),
+        transfers: transfersBySession.get(s.id) || [],
+      }));
+
+      setHistorySessions(history);
+      setExpandedHistoryId((prev) => (history.some((item) => item.id === prev) ? prev : ''));
+      setHistoryLoaded(true);
+      return history;
+    })();
+
+    historyLoadPromiseRef.current = request;
+    try {
+      return await request;
+    } finally {
+      historyLoadPromiseRef.current = null;
+      setHistoryLoading(false);
+    }
+  }
+
+  async function refreshLazyDatasets(options = {}) {
+    const { leaderboard = false, history = false } = options;
+    const tasks = [];
+    const currentTab = activeTabRef.current;
+
+    if (leaderboard) {
+      invalidateLazyData({ leaderboard: true });
+      if (currentTab === 'leaderboard' || leaderboardLoadedRef.current) {
+        tasks.push(loadLeaderboard({ force: true }));
       }
     }
 
-    const { data: sessionPlayers, error: spErr } = await supabase
-      .from('session_players')
-      .select('session_id,player_id,buy_in,final_chips,net_result')
-      .in('session_id', sessionIds);
-    if (spErr) throw spErr;
-
-    const { data: transferRows, error: trErr } = await supabase
-      .from('transfers')
-      .select('session_id,from_player_id,to_player_id,amount')
-      .in('session_id', sessionIds)
-      .order('id', { ascending: true });
-    if (trErr) throw trErr;
-
-    const playerIds = new Set();
-    sessions.forEach((s) => {
-      if (s.owner_id) playerIds.add(s.owner_id);
-    });
-    (sessionPlayers || []).forEach((p) => playerIds.add(p.player_id));
-    (transferRows || []).forEach((t) => {
-      playerIds.add(t.from_player_id);
-      playerIds.add(t.to_player_id);
-    });
-
-    let names = new Map();
-    const ids = Array.from(playerIds);
-    if (ids.length) {
-      const { data: profiles, error: profileErr } = await supabase
-        .from('profiles')
-        .select('id,nickname')
-        .in('id', ids);
-      if (profileErr) throw profileErr;
-      names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
+    if (history) {
+      invalidateLazyData({ history: true });
+      if (currentTab === 'history' || historyLoadedRef.current) {
+        tasks.push(loadHistorySessions({ force: true }));
+      }
     }
 
-    const playersBySession = new Map();
-    (sessionPlayers || []).forEach((row) => {
-      if (!playersBySession.has(row.session_id)) playersBySession.set(row.session_id, []);
-      playersBySession.get(row.session_id).push({
-        playerId: row.player_id,
-        nickname: names.get(row.player_id) || 'Unknown',
-        buyIn: toNonNegativeChipInt(row.buy_in),
-        finalChips: toNonNegativeChipInt(row.final_chips),
-        netResult: Math.round(Number(row.net_result || 0)),
-      });
+    if (tasks.length) {
+      await Promise.all(tasks);
+    }
+  }
+
+  async function applyMutationInvalidation(action, options = {}) {
+    const { hideOpenRooms = false } = options;
+    const nextPlan = deriveInvalidationPlan(action);
+    if (nextPlan.openRooms) {
+      if (hideOpenRooms) {
+        setOpenRooms([]);
+      } else {
+        await loadOpenRooms();
+      }
+    }
+    await refreshLazyDatasets({
+      leaderboard: nextPlan.leaderboard,
+      history: nextPlan.history,
     });
-
-    const transfersBySession = new Map();
-    (transferRows || []).forEach((row) => {
-      if (!transfersBySession.has(row.session_id)) transfersBySession.set(row.session_id, []);
-      transfersBySession.get(row.session_id).push({
-        fromPlayerId: row.from_player_id,
-        toPlayerId: row.to_player_id,
-        fromName: names.get(row.from_player_id) || row.from_player_id,
-        toName: names.get(row.to_player_id) || row.to_player_id,
-        amount: toNonNegativeChipInt(row.amount),
-      });
-    });
-
-    const history = sessions.map((s) => ({
-      id: s.id,
-      createdAt: s.created_at,
-      status: s.status,
-      ownerId: ownerFeatureEnabled ? s.owner_id || '' : '',
-      ownerName: ownerFeatureEnabled && s.owner_id ? names.get(s.owner_id) || 'Unknown' : '-',
-      rmbPer2000: Number(rateBySession.get(s.id) ?? DEFAULT_RMB_PER_2000),
-      players: (playersBySession.get(s.id) || []).sort((a, b) => b.netResult - a.netResult),
-      transfers: transfersBySession.get(s.id) || [],
-    }));
-
-    setHistorySessions(history);
-    setExpandedHistoryId((prev) => (history.some((item) => item.id === prev) ? prev : ''));
   }
 
   async function loadRoom(targetRoomId) {
@@ -1242,8 +1357,7 @@ export default function App() {
         },
         async () => {
           await loadRoom(targetRoomId);
-          await loadLeaderboard();
-          await loadHistorySessions();
+          await refreshLazyDatasets({ leaderboard: true, history: true });
         }
       )
       .on(
@@ -1256,6 +1370,7 @@ export default function App() {
         },
         async () => {
           await loadRoom(targetRoomId);
+          await refreshLazyDatasets({ history: true });
         }
       )
       .subscribe();
@@ -1277,7 +1392,6 @@ export default function App() {
     persistJoinedRoomForCurrentUser(nextRoomId);
     await subscribeRoom(nextRoomId);
     await loadRoom(nextRoomId);
-    await loadHistorySessions();
     setHistoryPage(1);
   }
 
@@ -1345,16 +1459,16 @@ export default function App() {
     }
 
     await enterRoom(targetRoomId);
-    await loadOpenRooms();
-    await loadGlobalStats();
+    await applyMutationInvalidation('create-room', { hideOpenRooms: true });
     showNotice('房间创建成功', 'success');
     } finally {
       endAction();
     }
   }
 
-  async function joinExistingRoom(target = roomId) {
-    if (!beginAction()) return;
+  async function joinExistingRoom(target = roomId, options = {}) {
+    const { refreshOpenRooms = false, useActionLock = true, skipEnsureProfile = false } = options;
+    if (useActionLock && !beginAction()) return;
     try {
     const targetRoomId = String(target || '').trim();
     if (!targetRoomId) {
@@ -1362,7 +1476,9 @@ export default function App() {
       return;
     }
 
-    await ensureProfile(user);
+    if (!skipEnsureProfile) {
+      await ensureProfile(user);
+    }
 
     const { data: existingSession, error: sessionCheckErr } = await supabase
       .from('sessions')
@@ -1404,10 +1520,15 @@ export default function App() {
     }
 
     await enterRoom(targetRoomId);
-    await loadOpenRooms();
-    await loadGlobalStats();
+    if (refreshOpenRooms) {
+      await loadOpenRooms();
+    } else {
+      await applyMutationInvalidation('join-room', { hideOpenRooms: true });
+    }
     } finally {
-      endAction();
+      if (useActionLock) {
+        endAction();
+      }
     }
   }
 
@@ -1433,10 +1554,8 @@ export default function App() {
       const existingPlayerIds = new Set(activePlayers.map((player) => player.player_id));
       let targetPlayer = targetProfile || findBestProfileForAdd(profileDirectory, typedNickname, existingPlayerIds);
       if (!targetPlayer) {
-        const { data: profileRows, error: profileErr } = await supabase.from('profiles').select('id,nickname').limit(5000);
-        if (profileErr) throw profileErr;
-        setProfileDirectory(profileRows || []);
-        targetPlayer = findBestProfileForAdd(profileRows || [], typedNickname, existingPlayerIds);
+        const latestProfiles = await loadProfileDirectory();
+        targetPlayer = findBestProfileForAdd(latestProfiles || [], typedNickname, existingPlayerIds);
       }
       if (!targetPlayer) {
         throw createAppError('PLAYER_NOT_FOUND', '该昵称未注册，无法添加');
@@ -1461,7 +1580,7 @@ export default function App() {
       setAddPlayerRemoteSuggestions([]);
       showNotice(`已添加玩家 ${targetPlayer.nickname}`, 'success');
       await loadRoom(joinedRoomId);
-      await loadOpenRooms();
+      await applyMutationInvalidation('add-player', { hideOpenRooms: true });
     } finally {
       setIsAddingPlayer(false);
     }
@@ -1495,7 +1614,7 @@ export default function App() {
       clearPlayerDrafts(targetPlayer.player_id);
       showNotice(`已移除玩家 ${targetPlayer.nickname || ''}`, 'success');
       await loadRoom(joinedRoomId);
-      await loadOpenRooms();
+      await applyMutationInvalidation('remove-player', { hideOpenRooms: true });
     } finally {
       setKickingPlayerId('');
     }
@@ -1568,9 +1687,7 @@ export default function App() {
       setDissolveConfirmOpen(false);
       showNotice('房间已解散', 'success');
       await loadOpenRooms();
-      await loadLeaderboard();
-      await loadHistorySessions();
-      await loadGlobalStats();
+      await refreshLazyDatasets({ leaderboard: true, history: true });
     } finally {
       setIsDissolving(false);
     }
@@ -1877,10 +1994,7 @@ export default function App() {
 
       showNotice('结算完成', 'success');
       await loadRoom(joinedRoomId);
-      await loadLeaderboard();
-      await loadHistorySessions();
-      await loadOpenRooms();
-      await loadGlobalStats();
+      await applyMutationInvalidation('settle-room', { hideOpenRooms: true });
     } finally {
       settleInFlightRef.current = false;
       setIsSettling(false);
@@ -2069,8 +2183,7 @@ export default function App() {
     if (joinedRoomId) {
       await loadRoom(joinedRoomId);
     }
-    await loadLeaderboard();
-    await loadHistorySessions();
+    await refreshLazyDatasets({ leaderboard: true, history: true });
     return true;
   }
 
@@ -2103,6 +2216,10 @@ export default function App() {
     if (user?.id) {
       clearPersistedJoinedRoom(user.id);
     }
+    if (roomChannelRef.current) {
+      await supabase.removeChannel(roomChannelRef.current);
+      roomChannelRef.current = null;
+    }
     setJoinedRoomId('');
     setLocalMockMode(false);
     setMockPlayers([]);
@@ -2116,13 +2233,20 @@ export default function App() {
     setRmbPer2000(DEFAULT_RMB_PER_2000);
     setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
     setLeaderboardRows([]);
+    setLeaderboardLoaded(false);
+    setLeaderboardLoading(false);
     setHistorySessions([]);
+    setHistoryLoaded(false);
+    setHistoryLoading(false);
     setExpandedHistoryId('');
     setHistoryPage(1);
     setDatePreset('all');
-    setCustomStartDate('');
-    setCustomEndDate('');
+    setCustomStartDate(defaultStartDate);
+    setCustomEndDate(defaultEndDate);
     setOpenRooms([]);
+    setProfileDirectory([]);
+    setProfileDirectoryLoaded(false);
+    setProfileDirectoryLoading(false);
     setDissolveConfirmOpen(false);
     setIsDissolving(false);
     setAccountMenuOpen(false);
@@ -2167,13 +2291,11 @@ export default function App() {
     setRoomOwnerId('');
     setRmbPer2000(DEFAULT_RMB_PER_2000);
     setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
-    setLeaderboardRows([]);
     setHistoryPage(1);
     setDissolveConfirmOpen(false);
     setIsDissolving(false);
     setNotice('');
     await loadOpenRooms();
-    await loadGlobalStats();
     prevTabRef.current = activeTab;
     setActiveTab('room');
     setAccountMenuOpen(false);
@@ -2225,28 +2347,81 @@ export default function App() {
       if (!hasSupabaseConfig || !user) return;
       try {
         await ensureProfile(user);
-        await loadProfileDirectory();
-        await loadOpenRooms();
-        const persistedRoomId = loadPersistedJoinedRoom(user.id, null);
-        if (persistedRoomId) {
+        invalidateLazyData({ leaderboard: true, history: true, profileDirectory: true });
+        setLeaderboardRows([]);
+        setHistorySessions([]);
+        setExpandedHistoryId('');
+        setHistoryPage(1);
+        setProfileDirectory([]);
+        setAddPlayerRemoteSuggestions([]);
+        const initialLoadPlan = deriveInitialLoadPlan({
+          persistedRoomId: loadPersistedJoinedRoom(user.id, null),
+        });
+        if (initialLoadPlan.restoreRoomId) {
           try {
-            await joinExistingRoom(persistedRoomId);
+            await joinExistingRoom(initialLoadPlan.restoreRoomId, {
+              refreshOpenRooms: false,
+              useActionLock: false,
+              skipEnsureProfile: true,
+            });
           } catch (err) {
             clearPersistedJoinedRoom(user.id, null);
             setJoinedRoomId('');
             showNotice(err.message || '已清理失效房间状态，请重新进入房间', 'error');
+            await loadOpenRooms();
           }
+        } else if (initialLoadPlan.loadOpenRooms) {
+          await loadOpenRooms();
         }
-        await loadLeaderboard();
-        await loadHistorySessions();
-        await loadGlobalStats();
       } catch (err) {
         showNotice(err.message, 'error');
       }
     }
 
     onUserReady();
-  }, [user]);
+  }, [user, defaultEndDate, defaultStartDate]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !user) return;
+    if (!shouldLoadTabData({ activeTab, targetTab: 'leaderboard', loaded: leaderboardLoaded, loading: leaderboardLoading })) {
+      return;
+    }
+    loadLeaderboard().catch((err) => showNotice(err.message, 'error'));
+  }, [activeTab, user, leaderboardLoaded, leaderboardLoading]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !user) return;
+    if (!shouldLoadTabData({ activeTab, targetTab: 'history', loaded: historyLoaded, loading: historyLoading })) {
+      return;
+    }
+    loadHistorySessions().catch((err) => showNotice(err.message, 'error'));
+  }, [activeTab, user, historyLoaded, historyLoading]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !user) return;
+    if (
+      !shouldLoadPlayerDirectory({
+        hasJoinedRoom: Boolean(joinedRoomId),
+        amRoomOwner,
+        showMineOnly,
+        focused: Boolean(addPlayerFocus || normalizeNickname(addPlayerNickname)),
+        loaded: profileDirectoryLoaded,
+        loading: profileDirectoryLoading,
+      })
+    ) {
+      return;
+    }
+    loadProfileDirectory().catch((err) => showNotice(err.message, 'error'));
+  }, [
+    user,
+    joinedRoomId,
+    amRoomOwner,
+    showMineOnly,
+    addPlayerFocus,
+    addPlayerNickname,
+    profileDirectoryLoaded,
+    profileDirectoryLoading,
+  ]);
 
   useEffect(() => {
     setExpandedLeaderboardId((prev) => (visibleLeaderboard.some((item) => item.playerId === prev) ? prev : ''));
@@ -2409,12 +2584,6 @@ export default function App() {
     );
   }
 
-  const totalBuyIn = activePlayers.reduce((acc, p) => acc + Number(p.buy_in || 0), 0);
-  const totalFinal = activePlayers.reduce((acc, p) => acc + Number(p.final_chips || 0), 0);
-  const hasJoinedRoom = Boolean(joinedRoomId);
-  const amRoomOwner = hasJoinedRoom && (!ownerFeatureEnabled || roomOwnerId === user.id);
-  const roomOwnerName = roomOwnerId ? nameById.get(roomOwnerId) || 'Unknown' : '-';
-  const visiblePlayers = showMineOnly ? sortedPlayers.filter((p) => p.player_id === user.id) : sortedPlayers;
   return (
     <main className="safe-area-bottom w-full px-3 py-3 sm:px-4 md:mx-auto md:max-w-6xl md:py-8">
       <section className="glass-card relative rounded-3xl px-4 py-2.5 sm:px-5 sm:py-3.5">
@@ -3068,7 +3237,9 @@ export default function App() {
         </div>
           <div key={leaderboardRenderKey} className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
           {!visibleLeaderboard.length && (
-            <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">暂无数据</div>
+            <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">
+              {leaderboardLoading && !leaderboardLoaded ? '积分榜加载中...' : '暂无数据'}
+            </div>
           )}
           {visibleLeaderboard.map((p) => {
             const mine = p.playerId === user.id;
@@ -3186,7 +3357,9 @@ export default function App() {
         <div className="mt-3 flex flex-1 flex-col">
           <div className="space-y-2.5">
           {!filteredHistorySessions.length && (
-            <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">暂无历史对局</div>
+            <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">
+              {historyLoading && !historyLoaded ? '历史记录加载中...' : '暂无历史对局'}
+            </div>
           )}
           {pagedHistorySessions.map((session, idx) => {
             const expanded = expandedHistoryId === session.id;

@@ -1,4 +1,4 @@
-# 数据库文档（Supabase, v2.1.5）
+# 数据库文档（Supabase, v2.1.6）
 
 ## 1. 初始化
 
@@ -58,6 +58,11 @@
 - `is_room_member(text)`
 - `is_room_owner(text)`
 - `can_settle_room(text)`
+
+`v2.1.6` 说明：
+
+- 本版本无数据库 schema 变更
+- 首屏性能优化全部发生在前端加载策略与请求编排层
 
 `v2.1.5` 关键策略调整：
 - `room_players` 写策略已升级为 `own_or_owner`
