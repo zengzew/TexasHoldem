@@ -1,4 +1,4 @@
-# 数据库文档（Supabase, v2.1.6）
+# 数据库文档（Supabase, v2.1.7）
 
 ## 1. 初始化
 
@@ -35,6 +35,11 @@
 - 结算后转账建议明细
 - 字段：`from_player_id`, `to_player_id`, `amount`
 
+6. `buy_in_events`
+- 玩家每次点击“确认”后的买入事件日志
+- 字段：`room_id`, `player_id`, `created_by`, `amount`, `created_at`
+- 用途：在玩家卡片中展示“累计总买入”的历史明细
+
 ## 3. 索引
 
 - `idx_room_players_room_id`
@@ -42,6 +47,7 @@
 - `idx_transfers_session_id`
 - `idx_sessions_owner_id`
 - `idx_profiles_nickname_ci_unique`
+- `idx_buy_in_events_room_player_created_at`
 
 ## 4. RLS 与函数
 
@@ -51,6 +57,7 @@
 - `room_players`
 - `session_players`
 - `transfers`
+- `buy_in_events`
 
 关键函数：
 - `nickname_exists(text)`
@@ -58,11 +65,12 @@
 - `is_room_member(text)`
 - `is_room_owner(text)`
 - `can_settle_room(text)`
+- `buy_in_events` 只允许房间成员读取，只允许本人或房主插入
 
-`v2.1.6` 说明：
+`v2.1.7` 说明：
 
-- 本版本无数据库 schema 变更
-- 首屏性能优化全部发生在前端加载策略与请求编排层
+- 新增 `buy_in_events` 表，用于记录每次确认后的买入积分变动
+- 用于“累计总买入”右侧信息弹窗展示按时间顺序的买入记录
 
 `v2.1.5` 关键策略调整：
 - `room_players` 写策略已升级为 `own_or_owner`

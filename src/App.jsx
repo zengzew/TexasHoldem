@@ -3,6 +3,7 @@ import { hasSupabaseConfig, supabase } from './supabase';
 import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
+import { buildBuyInEventPayload, normalizeBuyInEvents } from './utils/buyInHistory';
 import { getLeaderboardMetric } from './utils/leaderboardMetric';
 import {
   deriveInitialLoadPlan,
@@ -110,6 +111,16 @@ function AccountAvatarIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
       <circle cx="12" cy="8" r="3.5" />
       <path d="M5 19.5a7 7 0 0 1 14 0" />
+    </svg>
+  );
+}
+
+function InfoCircleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="h-3.5 w-3.5">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 10.5v5" strokeLinecap="round" />
+      <circle cx="12" cy="7.5" r="0.8" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -294,6 +305,9 @@ export default function App() {
   const [addPlayerFocus, setAddPlayerFocus] = useState(false);
   const [addPlayerRemoteSuggestions, setAddPlayerRemoteSuggestions] = useState([]);
   const [isSearchingPlayers, setIsSearchingPlayers] = useState(false);
+  const [buyInHistoryByKey, setBuyInHistoryByKey] = useState({});
+  const [buyInHistoryLoadingKey, setBuyInHistoryLoadingKey] = useState('');
+  const [openBuyInHistoryKey, setOpenBuyInHistoryKey] = useState('');
   const startDateNativeRef = useRef(null);
   const endDateNativeRef = useRef(null);
 
@@ -310,6 +324,8 @@ export default function App() {
   const ownerSchemaNoticeShownRef = useRef(false);
   const rmbSchemaNoticeShownRef = useRef(false);
   const prevTabRef = useRef('room');
+  const buyInHistoryPopoverRef = useRef(null);
+  const buyInHistoryTriggerRef = useRef(null);
   const BUY_IN_STEP = 2000;
   const HISTORY_PAGE_SIZE = 5;
   const LEADERBOARD_COLLAPSED_COUNT = leaderboardCollapsedCount;
@@ -723,6 +739,34 @@ export default function App() {
 
   function toNonNegativeChipInt(value) {
     return Math.max(0, toChipInt(value));
+  }
+
+  function getBuyInHistoryKey(roomIdValue, playerIdValue) {
+    if (!roomIdValue || !playerIdValue) return '';
+    return `${roomIdValue}:${playerIdValue}`;
+  }
+
+  async function loadBuyInHistory(roomIdValue, playerIdValue, options = {}) {
+    const cacheKey = getBuyInHistoryKey(roomIdValue, playerIdValue);
+    if (!cacheKey) return [];
+    if (!options.force && buyInHistoryByKey[cacheKey]) {
+      return buyInHistoryByKey[cacheKey];
+    }
+    setBuyInHistoryLoadingKey(cacheKey);
+    try {
+      const { data, error } = await supabase
+        .from('buy_in_events')
+        .select('amount,created_at')
+        .eq('room_id', roomIdValue)
+        .eq('player_id', playerIdValue)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      const nextEvents = normalizeBuyInEvents(data || []);
+      setBuyInHistoryByKey((prev) => ({ ...prev, [cacheKey]: nextEvents }));
+      return nextEvents;
+    } finally {
+      setBuyInHistoryLoadingKey((prev) => (prev === cacheKey ? '' : prev));
+    }
   }
 
   function chipsToRmb(chips, rate = rmbPer2000) {
@@ -1217,6 +1261,8 @@ export default function App() {
 
   async function loadRoom(targetRoomId) {
     if (!targetRoomId) return;
+    setOpenBuyInHistoryKey('');
+    setBuyInHistoryLoadingKey('');
 
     const { data: roomRows, error } = await supabase
       .from('room_players')
@@ -1835,6 +1881,19 @@ export default function App() {
               : item
           )
         );
+        if (topUpAmount != null && topUpAmount !== 0) {
+          const cacheKey = getBuyInHistoryKey(joinedRoomId, playerId);
+          setBuyInHistoryByKey((prev) => ({
+            ...prev,
+            [cacheKey]: normalizeBuyInEvents([
+              ...(prev[cacheKey] || []),
+              {
+                amount: topUpAmount,
+                created_at: new Date().toISOString(),
+              },
+            ]),
+          }));
+        }
         clearPlayerDrafts(playerId);
         return;
       }
@@ -1872,6 +1931,30 @@ export default function App() {
       );
 
       clearPlayerDrafts(playerId);
+
+      if (topUpAmount != null && topUpAmount !== 0) {
+        const eventPayload = buildBuyInEventPayload({
+          roomId: joinedRoomId,
+          playerId,
+          createdBy: user.id,
+          amount: topUpAmount,
+        });
+        const cacheKey = getBuyInHistoryKey(joinedRoomId, playerId);
+        setBuyInHistoryByKey((prev) => ({
+          ...prev,
+          [cacheKey]: normalizeBuyInEvents([
+            ...(prev[cacheKey] || []),
+            {
+              amount: topUpAmount,
+              created_at: new Date().toISOString(),
+            },
+          ]),
+        }));
+        const { error: buyInEventError } = await supabase.from('buy_in_events').insert(eventPayload);
+        if (buyInEventError) {
+          showNotice('买入已更新，但买入记录功能需要先执行最新 supabase_schema.sql', 'error');
+        }
+      }
     } finally {
       confirmInFlightPlayerIdsRef.current.delete(playerId);
       setConfirmingPlayerIds((prev) => {
@@ -2291,6 +2374,9 @@ export default function App() {
     setRoomOwnerId('');
     setRmbPer2000(DEFAULT_RMB_PER_2000);
     setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
+    setBuyInHistoryByKey({});
+    setBuyInHistoryLoadingKey('');
+    setOpenBuyInHistoryKey('');
     setHistoryPage(1);
     setDissolveConfirmOpen(false);
     setIsDissolving(false);
@@ -2380,6 +2466,22 @@ export default function App() {
 
     onUserReady();
   }, [user, defaultEndDate, defaultStartDate]);
+
+  useEffect(() => {
+    if (!openBuyInHistoryKey) return undefined;
+    function handlePointerDown(event) {
+      const target = event.target;
+      if (buyInHistoryPopoverRef.current?.contains(target)) return;
+      if (buyInHistoryTriggerRef.current?.contains(target)) return;
+      setOpenBuyInHistoryKey('');
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [openBuyInHistoryKey]);
 
   useEffect(() => {
     if (!hasSupabaseConfig || !user) return;
@@ -2764,7 +2866,7 @@ export default function App() {
             </div>
             )}
             <p className="mt-2 text-xs text-slate-500">
-              房主可修改所有玩家的买入/最终积分和积分换算，并有权限结算本局。
+              房主可添加/移除玩家，修改所有玩家的买入/最终积分和积分换算，并有权限结算本局。
             </p>
 
           </div>
@@ -2956,6 +3058,10 @@ export default function App() {
             const canKick = hasJoinedRoom && amRoomOwner && !mine && p.player_id !== roomOwnerId && roomStatus !== 'settled';
             const isKicking = kickingPlayerId === p.player_id;
             const isConfirming = Boolean(confirmingPlayerIds[p.player_id]);
+            const buyInHistoryKey = getBuyInHistoryKey(joinedRoomId, p.player_id);
+            const buyInHistoryEvents = buyInHistoryByKey[buyInHistoryKey] || [];
+            const buyInHistoryOpen = openBuyInHistoryKey === buyInHistoryKey;
+            const buyInHistoryLoading = buyInHistoryLoadingKey === buyInHistoryKey;
             const buyDraft = buyInDrafts[p.player_id];
             const finalDraft = finalChipsDrafts[p.player_id];
             const displayBuyIn = buyDraft ?? '';
@@ -3000,15 +3106,74 @@ export default function App() {
                     </button>
                   )}
                 </div>
-                <p className="mb-2 text-xs font-medium text-slate-500">
-                  累计总买入：
-                  <AnimatedNumber
-                    className="ml-1 font-semibold text-slate-700"
-                    value={toNonNegativeChipInt(p.buy_in)}
-                    format={(n) => toChips(n)}
-                  />{' '}
-                  积分
-                </p>
+                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-500">
+                  <p className="min-w-0">
+                    累计总买入：
+                    <AnimatedNumber
+                      className="ml-1 font-semibold text-slate-700"
+                      value={toNonNegativeChipInt(p.buy_in)}
+                      format={(n) => toChips(n)}
+                    />{' '}
+                    积分
+                  </p>
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      aria-label="查看买入记录"
+                      className="info-trigger"
+                      ref={buyInHistoryOpen ? buyInHistoryTriggerRef : null}
+                      onClick={async () => {
+                        if (!buyInHistoryKey) return;
+                        if (buyInHistoryOpen) {
+                          setOpenBuyInHistoryKey('');
+                          return;
+                        }
+                        setOpenBuyInHistoryKey(buyInHistoryKey);
+                        try {
+                          await loadBuyInHistory(joinedRoomId, p.player_id);
+                        } catch (err) {
+                          setOpenBuyInHistoryKey('');
+                          showNotice(err.message, 'error');
+                        }
+                      }}
+                    >
+                      <InfoCircleIcon />
+                    </button>
+                    {buyInHistoryOpen && (
+                      <div
+                        ref={buyInHistoryPopoverRef}
+                        className="date-popover absolute right-0 top-[calc(100%+0.5rem)] z-30 w-[min(82vw,17rem)] rounded-2xl border border-white/80 bg-white/92 p-3 shadow-xl backdrop-blur-xl"
+                      >
+                        <div className="account-popover-arrow right-4 top-[-0.45rem]" aria-hidden />
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-semibold text-slate-900">买入记录</p>
+                            {buyInHistoryLoading && <LoadingSpinner className="h-3.5 w-3.5 text-slate-400" />}
+                          </div>
+                          {buyInHistoryEvents.length ? (
+                            <ul className="space-y-1.5">
+                              {buyInHistoryEvents.map((event, idx) => (
+                                <li
+                                  key={`${event.created_at || idx}-${event.amount}-${idx}`}
+                                  className="flex items-center justify-between rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700"
+                                >
+                                  <span className="font-medium text-slate-500">{event.displayTime}</span>
+                                  <span className={event.amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                                    {event.displayAmount} 积分
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-500">
+                              {buyInHistoryLoading ? '加载中...' : '暂无买入记录'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 <label className="block">
                   <span className="field-label">本次买入</span>

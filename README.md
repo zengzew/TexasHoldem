@@ -1,4 +1,4 @@
-# TEXAS HOLD'EM SCORE v2.1.6
+# TEXAS HOLD'EM SCORE v2.1.7
 
 React + Supabase 的德州扑克聚会积分系统（Web）。
 
@@ -11,6 +11,7 @@ React + Supabase 的德州扑克聚会积分系统（Web）。
 - 买入与最终积分录入，结算与转账建议
 - 买入“确认”按钮支持防重复提交（loading + in-flight 防抖）
 - 买入支持负数冲正（用于误确认纠错），累计总买入下限为 0
+- 玩家卡片支持查看累计总买入的逐笔记录（按时间顺序、仅显示 `HH:mm`）
 - 历史记录（分页、可展开详情）
 - 历史积分榜（净盈利 / ROI / 场均金额 / 金额 / 胜率）
 - 日期范围筛选（积分榜弹出式 Date Picker，默认当年 1 月 1 日到今天）
@@ -55,6 +56,7 @@ npm run dev
 1. 创建 Supabase Project
 2. 在 SQL Editor 执行：
    - [`supabase_schema.sql`](/Users/zengze/Documents/New%20project/supabase_schema.sql)
+   - 本次升级会新增 `buy_in_events` 表，发布前需要先执行最新版 schema
 3. Authentication 中启用 Email/Password
    - 建议关闭 `Confirm email`，便于昵称映射邮箱登录
 4. Realtime 中启用表：

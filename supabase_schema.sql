@@ -80,6 +80,15 @@ create table if not exists public.transfers (
   amount numeric(12,2) not null
 );
 
+create table if not exists public.buy_in_events (
+  id uuid primary key default gen_random_uuid(),
+  room_id text not null references public.sessions(id) on delete cascade,
+  player_id uuid not null references public.profiles(id) on delete cascade,
+  created_by uuid not null references public.profiles(id) on delete cascade,
+  amount numeric(12,2) not null,
+  created_at timestamptz not null default now()
+);
+
 -- Remove legacy admin artifacts
 
 drop table if exists public.admins cascade;
@@ -94,6 +103,7 @@ create index if not exists idx_room_players_room_id on public.room_players(room_
 create index if not exists idx_session_players_player_id on public.session_players(player_id);
 create index if not exists idx_transfers_session_id on public.transfers(session_id);
 create index if not exists idx_sessions_owner_id on public.sessions(owner_id);
+create index if not exists idx_buy_in_events_room_player_created_at on public.buy_in_events(room_id, player_id, created_at);
 
 -- Normalize existing duplicate nicknames safely.
 with dup as (
@@ -237,6 +247,7 @@ alter table public.room_players enable row level security;
 alter table public.sessions enable row level security;
 alter table public.session_players enable row level security;
 alter table public.transfers enable row level security;
+alter table public.buy_in_events enable row level security;
 
 -- ------------------------------------------------------------------
 -- Helper functions
@@ -455,6 +466,33 @@ drop policy if exists "transfers delete by owner" on public.transfers;
 create policy "transfers delete by owner" on public.transfers
 for delete to authenticated
 using (public.can_settle_room(session_id));
+
+-- buy_in_events
+
+drop policy if exists "buy in events read" on public.buy_in_events;
+create policy "buy in events read" on public.buy_in_events
+for select to authenticated
+using (public.is_room_member(room_id));
+
+drop policy if exists "buy in events insert own_or_owner" on public.buy_in_events;
+create policy "buy in events insert own_or_owner" on public.buy_in_events
+for insert to authenticated
+with check (
+  public.is_room_member(room_id)
+  and created_by = auth.uid()
+  and (player_id = auth.uid() or public.is_room_owner(room_id))
+);
+
+drop policy if exists "buy in events update deny" on public.buy_in_events;
+create policy "buy in events update deny" on public.buy_in_events
+for update to authenticated
+using (false)
+with check (false);
+
+drop policy if exists "buy in events delete deny" on public.buy_in_events;
+create policy "buy in events delete deny" on public.buy_in_events
+for delete to authenticated
+using (false);
 
 commit;
 

@@ -4,6 +4,7 @@
 begin;
 
 -- 1) Clear game data
+truncate table public.buy_in_events;
 truncate table public.transfers restart identity;
 truncate table public.session_players restart identity;
 truncate table public.room_players restart identity;
