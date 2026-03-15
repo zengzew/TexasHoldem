@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
+  shouldRefreshSettledViews,
   shouldLoadPlayerDirectory,
   shouldLoadTabData,
 } from './firstLoadPolicy';
@@ -11,6 +12,7 @@ describe('firstLoadPolicy', () => {
     expect(deriveInitialLoadPlan({ persistedRoomId: '20260313' })).toEqual({
       restoreRoomId: '20260313',
       loadOpenRooms: false,
+      preserveRoomShell: true,
     });
   });
 
@@ -18,6 +20,7 @@ describe('firstLoadPolicy', () => {
     expect(deriveInitialLoadPlan({ persistedRoomId: '' })).toEqual({
       restoreRoomId: '',
       loadOpenRooms: true,
+      preserveRoomShell: false,
     });
   });
 
@@ -88,5 +91,11 @@ describe('firstLoadPolicy', () => {
       leaderboard: true,
       history: true,
     });
+  });
+
+  it('refreshes settled views only when total settled games changes', () => {
+    expect(shouldRefreshSettledViews({ previousSettledCount: 3, nextSettledCount: 3 })).toBe(false);
+    expect(shouldRefreshSettledViews({ previousSettledCount: 3, nextSettledCount: 4 })).toBe(true);
+    expect(shouldRefreshSettledViews({ previousSettledCount: 0, nextSettledCount: 1 })).toBe(true);
   });
 });

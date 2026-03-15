@@ -8,6 +8,7 @@ import { getLeaderboardMetric } from './utils/leaderboardMetric';
 import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
+  shouldRefreshSettledViews,
   shouldLoadPlayerDirectory,
   shouldLoadTabData,
 } from './utils/firstLoadPolicy';
@@ -319,6 +320,7 @@ export default function App() {
   const activeTabRef = useRef(activeTab);
   const leaderboardLoadedRef = useRef(false);
   const historyLoadedRef = useRef(false);
+  const roomStatusRef = useRef(roomStatus);
   const settleInFlightRef = useRef(false);
   const confirmInFlightPlayerIdsRef = useRef(new Set());
   const actionLockRef = useRef(false);
@@ -651,6 +653,7 @@ export default function App() {
   activeTabRef.current = activeTab;
   leaderboardLoadedRef.current = leaderboardLoaded;
   historyLoadedRef.current = historyLoaded;
+  roomStatusRef.current = roomStatus;
 
   function nicknameToEmail(rawNickname) {
     const normalized = normalizeNickname(rawNickname).toLowerCase();
@@ -1402,9 +1405,18 @@ export default function App() {
           table: 'sessions',
           filter: `id=eq.${targetRoomId}`,
         },
-        async () => {
+        async (payload) => {
+          const previousStatus = roomStatusRef.current;
+          const nextStatus = payload.new?.status || '';
           await loadRoom(targetRoomId);
-          await refreshLazyDatasets({ leaderboard: true, history: true });
+          if (
+            shouldRefreshSettledViews({
+              previousSettledCount: previousStatus === 'settled' ? 1 : 0,
+              nextSettledCount: nextStatus === 'settled' ? 1 : 0,
+            })
+          ) {
+            await refreshLazyDatasets({ leaderboard: true, history: true });
+          }
         }
       )
       .on(
@@ -2445,6 +2457,10 @@ export default function App() {
           persistedRoomId: loadPersistedJoinedRoom(user.id, null),
         });
         if (initialLoadPlan.restoreRoomId) {
+          if (initialLoadPlan.preserveRoomShell) {
+            setJoinedRoomId(initialLoadPlan.restoreRoomId);
+            setRoomId(initialLoadPlan.restoreRoomId);
+          }
           try {
             await joinExistingRoom(initialLoadPlan.restoreRoomId, {
               refreshOpenRooms: false,
@@ -3107,7 +3123,7 @@ export default function App() {
                     </button>
                   )}
                 </div>
-                <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-500">
+                <div className="relative mb-2 flex items-center gap-2 text-xs font-medium text-slate-500">
                   <p className="min-w-0">
                     累计总买入：
                     <AnimatedNumber
@@ -3117,7 +3133,7 @@ export default function App() {
                     />{' '}
                     积分
                   </p>
-                  <div className="relative shrink-0">
+                  <div className="shrink-0">
                     <button
                       type="button"
                       aria-label="查看买入记录"
@@ -3140,40 +3156,40 @@ export default function App() {
                     >
                       <InfoCircleIcon />
                     </button>
-                    {buyInHistoryOpen && (
-                      <div
-                        ref={buyInHistoryPopoverRef}
-                        className={getBuyInPopoverClassName()}
-                      >
-                        <div className="account-popover-arrow right-auto left-[-0.45rem] top-1/2 -translate-y-1/2" aria-hidden />
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold text-slate-900">买入记录</p>
-                            {buyInHistoryLoading && <LoadingSpinner className="h-3.5 w-3.5 text-slate-400" />}
-                          </div>
-                          {buyInHistoryEvents.length ? (
-                            <ul className="space-y-1.5">
-                              {buyInHistoryEvents.map((event, idx) => (
-                                <li
-                                  key={`${event.created_at || idx}-${event.amount}-${idx}`}
-                                  className="flex items-center justify-between rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700"
-                                >
-                                  <span className="font-medium text-slate-500">{event.displayTime}</span>
-                                  <span className={event.amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
-                                    {event.displayAmount} 积分
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-500">
-                              {buyInHistoryLoading ? '加载中...' : '暂无买入记录'}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
                   </div>
+                  {buyInHistoryOpen && (
+                    <div
+                      ref={buyInHistoryPopoverRef}
+                      className={getBuyInPopoverClassName()}
+                    >
+                      <div className="account-popover-arrow hidden right-auto left-[-0.45rem] top-1/2 -translate-y-1/2 sm:block" aria-hidden />
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-semibold text-slate-900">买入记录</p>
+                          {buyInHistoryLoading && <LoadingSpinner className="h-3.5 w-3.5 text-slate-400" />}
+                        </div>
+                        {buyInHistoryEvents.length ? (
+                          <ul className="space-y-1.5">
+                            {buyInHistoryEvents.map((event, idx) => (
+                              <li
+                                key={`${event.created_at || idx}-${event.amount}-${idx}`}
+                                className="flex items-center justify-between rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-700"
+                              >
+                                <span className="font-medium text-slate-500">{event.displayTime}</span>
+                                <span className={event.amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                                  {event.displayAmount} 积分
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="rounded-xl border border-white/70 bg-white/70 px-3 py-2 text-sm text-slate-500">
+                            {buyInHistoryLoading ? '加载中...' : '暂无买入记录'}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <label className="block">

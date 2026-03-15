@@ -3,6 +3,7 @@ export function deriveInitialLoadPlan({ persistedRoomId }) {
   return {
     restoreRoomId,
     loadOpenRooms: !restoreRoomId,
+    preserveRoomShell: Boolean(restoreRoomId),
   };
 }
 
@@ -48,4 +49,8 @@ export function deriveInvalidationPlan(action) {
         history: false,
       };
   }
+}
+
+export function shouldRefreshSettledViews({ previousSettledCount, nextSettledCount }) {
+  return Number(previousSettledCount || 0) !== Number(nextSettledCount || 0);
 }
