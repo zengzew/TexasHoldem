@@ -13,6 +13,7 @@ import {
 } from './utils/firstLoadPolicy';
 import { clearPersistedJoinedRoom, loadPersistedJoinedRoom, savePersistedJoinedRoom } from './utils/roomState';
 import { buildLeftMatchSuggestions, findBestProfileForAdd } from './utils/playerSearch';
+import { getBuyInPopoverClassName } from './utils/buyInPopover';
 import ownerCrownIcon from './assets/owner-crown.svg';
 import chevronDownIcon from './assets/chevron-down.svg';
 import medalGoldIcon from './assets/medal-gold.svg';
@@ -3142,9 +3143,9 @@ export default function App() {
                     {buyInHistoryOpen && (
                       <div
                         ref={buyInHistoryPopoverRef}
-                        className="date-popover absolute right-0 top-[calc(100%+0.5rem)] z-30 w-[min(82vw,17rem)] rounded-2xl border border-white/80 bg-white/92 p-3 shadow-xl backdrop-blur-xl"
+                        className={getBuyInPopoverClassName()}
                       >
-                        <div className="account-popover-arrow right-4 top-[-0.45rem]" aria-hidden />
+                        <div className="account-popover-arrow right-auto left-[-0.45rem] top-1/2 -translate-y-1/2" aria-hidden />
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <p className="text-sm font-semibold text-slate-900">买入记录</p>
