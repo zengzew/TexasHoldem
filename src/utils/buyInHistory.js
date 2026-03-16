@@ -39,3 +39,12 @@ export function buildBuyInEventPayload({ roomId, playerId, createdBy, amount }) 
     amount: toChipInt(amount),
   };
 }
+
+export function buildInitialBuyInEventPayload({ roomId, playerId, createdBy }) {
+  return buildBuyInEventPayload({
+    roomId,
+    playerId,
+    createdBy,
+    amount: 2000,
+  });
+}

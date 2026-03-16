@@ -3,7 +3,7 @@ import { hasSupabaseConfig, supabase } from './supabase';
 import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
-import { buildBuyInEventPayload, normalizeBuyInEvents } from './utils/buyInHistory';
+import { buildBuyInEventPayload, buildInitialBuyInEventPayload, normalizeBuyInEvents } from './utils/buyInHistory';
 import { LEADERBOARD_BENCHMARKS } from './utils/leaderboardBenchmarks';
 import { getLeaderboardMetric } from './utils/leaderboardMetric';
 import {
@@ -740,6 +740,40 @@ export default function App() {
     return `${roomIdValue}:${playerIdValue}`;
   }
 
+  function appendBuyInHistoryEvent(roomIdValue, playerIdValue, amount, createdAt = new Date().toISOString()) {
+    const cacheKey = getBuyInHistoryKey(roomIdValue, playerIdValue);
+    if (!cacheKey) return;
+    setBuyInHistoryByKey((prev) => ({
+      ...prev,
+      [cacheKey]: normalizeBuyInEvents([
+        ...(prev[cacheKey] || []),
+        {
+          amount,
+          created_at: createdAt,
+        },
+      ]),
+    }));
+  }
+
+  async function recordInitialBuyInEvent(roomIdValue, playerIdValue, options = {}) {
+    const { createdBy = user?.id, noticeMessage = '买入记录功能需要先执行最新 supabase_schema.sql' } = options;
+    if (!roomIdValue || !playerIdValue || !createdBy) return;
+    const createdAt = new Date().toISOString();
+    const { error } = await supabase.from('buy_in_events').insert({
+      ...buildInitialBuyInEventPayload({
+        roomId: roomIdValue,
+        playerId: playerIdValue,
+        createdBy,
+      }),
+      created_at: createdAt,
+    });
+    if (error) {
+      showNotice(noticeMessage, 'error');
+      return;
+    }
+    appendBuyInHistoryEvent(roomIdValue, playerIdValue, 2000, createdAt);
+  }
+
   async function loadBuyInHistory(roomIdValue, playerIdValue, options = {}) {
     const cacheKey = getBuyInHistoryKey(roomIdValue, playerIdValue);
     if (!cacheKey) return [];
@@ -850,18 +884,24 @@ export default function App() {
     if (history && user?.id) {
       tasks.push(
         Promise.all([
-          supabase.from('room_players').select('room_id').eq('player_id', user.id).limit(5000),
+          supabase.from('room_players').select('room_id,updated_at').eq('player_id', user.id).limit(5000),
           supabase.from('session_players').select('session_id').eq('player_id', user.id).limit(5000),
         ]).then(([roomResult, settledResult]) => {
           if (roomResult.error) throw roomResult.error;
           if (settledResult.error) throw settledResult.error;
+          const roomRows = roomResult.data || [];
+          const settledRows = settledResult.data || [];
           const allSessionIds = new Set([
-            ...(roomResult.data || []).map((row) => row.room_id),
-            ...(settledResult.data || []).map((row) => row.session_id),
+            ...roomRows.map((row) => row.room_id),
+            ...settledRows.map((row) => row.session_id),
           ]);
           result.history = {
             totalCount: allSessionIds.size,
-            settledCount: Number((settledResult.data || []).length),
+            settledCount: Number(settledRows.length),
+            latestMarker: roomRows.reduce((latest, row) => {
+              const candidate = String(row.updated_at || '');
+              return candidate > latest ? candidate : latest;
+            }, ''),
           };
         })
       );
@@ -1096,7 +1136,7 @@ export default function App() {
     setHistoryLoading(true);
     const request = (async () => {
       const [{ data: roomRows, error: roomErr }, { data: settledRows, error: settledErr }] = await Promise.all([
-        supabase.from('room_players').select('room_id').eq('player_id', user.id).limit(2000),
+        supabase.from('room_players').select('room_id,updated_at').eq('player_id', user.id).limit(2000),
         supabase.from('session_players').select('session_id').eq('player_id', user.id).limit(2000),
       ]);
       if (roomErr) throw roomErr;
@@ -1251,6 +1291,10 @@ export default function App() {
       historyFreshnessRef.current = {
         totalCount: history.length,
         settledCount: history.filter((session) => session.status === 'settled').length,
+        latestMarker: (roomRows || []).reduce((latest, row) => {
+          const candidate = String(row.updated_at || '');
+          return candidate > latest ? candidate : latest;
+        }, ''),
       };
       setHistorySessions(history);
       setExpandedHistoryId((prev) => (history.some((item) => item.id === prev) ? prev : ''));
@@ -1333,6 +1377,7 @@ export default function App() {
     await refreshLazyDatasets({
       leaderboard: nextPlan.leaderboard,
       history: nextPlan.history,
+      guardByFreshness: nextPlan.leaderboard || nextPlan.history,
     });
   }
 
@@ -1511,7 +1556,7 @@ export default function App() {
               nextSettledCount: nextStatus === 'settled' ? 1 : 0,
             })
           ) {
-            await refreshLazyDatasets({ leaderboard: true, history: true });
+            await refreshLazyDatasets({ leaderboard: true, history: true, guardByFreshness: true });
           }
         }
       )
@@ -1615,6 +1660,10 @@ export default function App() {
       throw createSessionErr;
     }
 
+    await recordInitialBuyInEvent(targetRoomId, user.id, {
+      noticeMessage: '房间已创建，但买入记录功能需要先执行最新 supabase_schema.sql',
+    });
+
     await enterRoom(targetRoomId);
     await applyMutationInvalidation('create-room', { hideOpenRooms: true });
     showNotice('房间创建成功', 'success');
@@ -1667,6 +1716,9 @@ export default function App() {
         final_chips: null,
       });
       if (insertErr) throw insertErr;
+      await recordInitialBuyInEvent(targetRoomId, user.id, {
+        noticeMessage: '已加入房间，但买入记录功能需要先执行最新 supabase_schema.sql',
+      });
     } else if (me.final_chips == null && Number(me.buy_in || 0) <= 0) {
       const { error: ensureDefaultErr } = await supabase
         .from('room_players')
@@ -1674,6 +1726,9 @@ export default function App() {
         .eq('room_id', targetRoomId)
         .eq('player_id', user.id);
       if (ensureDefaultErr) throw ensureDefaultErr;
+      await recordInitialBuyInEvent(targetRoomId, user.id, {
+        noticeMessage: '默认买入已恢复，但买入记录功能需要先执行最新 supabase_schema.sql',
+      });
     }
 
     await enterRoom(targetRoomId);
@@ -1731,6 +1786,10 @@ export default function App() {
         }
         throw insertErr;
       }
+
+      await recordInitialBuyInEvent(joinedRoomId, targetPlayer.id, {
+        noticeMessage: '玩家已添加，但买入记录功能需要先执行最新 supabase_schema.sql',
+      });
 
       setAddPlayerNickname('');
       setAddPlayerFocus(false);
@@ -1995,17 +2054,7 @@ export default function App() {
           )
         );
         if (topUpAmount != null && topUpAmount !== 0) {
-          const cacheKey = getBuyInHistoryKey(joinedRoomId, playerId);
-          setBuyInHistoryByKey((prev) => ({
-            ...prev,
-            [cacheKey]: normalizeBuyInEvents([
-              ...(prev[cacheKey] || []),
-              {
-                amount: topUpAmount,
-                created_at: new Date().toISOString(),
-              },
-            ]),
-          }));
+          appendBuyInHistoryEvent(joinedRoomId, playerId, topUpAmount);
         }
         clearPlayerDrafts(playerId);
         return;
@@ -2052,17 +2101,7 @@ export default function App() {
           createdBy: user.id,
           amount: topUpAmount,
         });
-        const cacheKey = getBuyInHistoryKey(joinedRoomId, playerId);
-        setBuyInHistoryByKey((prev) => ({
-          ...prev,
-          [cacheKey]: normalizeBuyInEvents([
-            ...(prev[cacheKey] || []),
-            {
-              amount: topUpAmount,
-              created_at: new Date().toISOString(),
-            },
-          ]),
-        }));
+        appendBuyInHistoryEvent(joinedRoomId, playerId, topUpAmount);
         const { error: buyInEventError } = await supabase.from('buy_in_events').insert(eventPayload);
         if (buyInEventError) {
           showNotice('买入已更新，但买入记录功能需要先执行最新 supabase_schema.sql', 'error');

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildBuyInEventPayload, formatBuyInEventTime, normalizeBuyInEvents } from './buyInHistory';
+import {
+  buildBuyInEventPayload,
+  buildInitialBuyInEventPayload,
+  formatBuyInEventTime,
+  normalizeBuyInEvents,
+} from './buyInHistory';
 
 describe('buyInHistory utils', () => {
   it('sorts buy-in events by created_at ascending', () => {
@@ -39,6 +44,21 @@ describe('buyInHistory utils', () => {
       player_id: 'player-1',
       created_by: 'owner-1',
       amount: -2000,
+    });
+  });
+
+  it('builds an initial buy-in payload with default +2000 amount', () => {
+    expect(
+      buildInitialBuyInEventPayload({
+        roomId: '20260315',
+        playerId: 'player-1',
+        createdBy: 'owner-1',
+      })
+    ).toEqual({
+      room_id: '20260315',
+      player_id: 'player-1',
+      created_by: 'owner-1',
+      amount: 2000,
     });
   });
 });

@@ -69,6 +69,7 @@ export function shouldRefreshLeaderboardViews({ previousSignature, nextSignature
 export function shouldRefreshHistoryViews({ previousSignature, nextSignature }) {
   return (
     Number(previousSignature?.totalCount || 0) !== Number(nextSignature?.totalCount || 0) ||
-    Number(previousSignature?.settledCount || 0) !== Number(nextSignature?.settledCount || 0)
+    Number(previousSignature?.settledCount || 0) !== Number(nextSignature?.settledCount || 0) ||
+    String(previousSignature?.latestMarker || '') !== String(nextSignature?.latestMarker || '')
   );
 }

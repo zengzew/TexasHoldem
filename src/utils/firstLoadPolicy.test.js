@@ -147,25 +147,32 @@ describe('firstLoadPolicy', () => {
     ).toBe(true);
   });
 
-  it('refreshes history when either total or settled participated sessions change', () => {
+  it('refreshes history only when the history signature changes', () => {
     expect(
       shouldRefreshHistoryViews({
-        previousSignature: { totalCount: 5, settledCount: 4 },
-        nextSignature: { totalCount: 5, settledCount: 4 },
+        previousSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
+        nextSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
       })
     ).toBe(false);
 
     expect(
       shouldRefreshHistoryViews({
-        previousSignature: { totalCount: 5, settledCount: 4 },
-        nextSignature: { totalCount: 6, settledCount: 4 },
+        previousSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
+        nextSignature: { totalCount: 6, settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
       })
     ).toBe(true);
 
     expect(
       shouldRefreshHistoryViews({
-        previousSignature: { totalCount: 5, settledCount: 4 },
-        nextSignature: { totalCount: 5, settledCount: 5 },
+        previousSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
+        nextSignature: { totalCount: 5, settledCount: 5, latestMarker: '2026-03-17T08:00:00.000Z' },
+      })
+    ).toBe(true);
+
+    expect(
+      shouldRefreshHistoryViews({
+        previousSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
+        nextSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T09:00:00.000Z' },
       })
     ).toBe(true);
   });
