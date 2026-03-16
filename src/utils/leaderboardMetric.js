@@ -20,31 +20,37 @@ function formatChips(value) {
 
 export function getLeaderboardMetric(row, metric = 'profit') {
   const totalProfit = safeNumber(row?.totalProfit);
+  const avgProfitPerSession = safeNumber(row?.avgProfitPerSession);
   const roi = safeNumber(row?.roi);
   const amountRmb = safeNumber(row?.amountRmb);
   const winRate = safeNumber(row?.winRate);
   const avgAmountPerSession = safeNumber(row?.avgAmountPerSession);
 
   switch (metric) {
-    case 'roi':
+    case 'avgProfit':
       return {
-        text: formatSignedPercent(roi),
-        isPositive: roi >= 0,
+        text: formatChips(avgProfitPerSession),
+        isPositive: avgProfitPerSession >= 0,
       };
     case 'amount':
       return {
         text: formatRmb(amountRmb),
         isPositive: amountRmb >= 0,
       };
-    case 'winRate':
-      return {
-        text: formatSignedPercent(winRate),
-        isPositive: winRate >= 0,
-      };
     case 'efficiency':
       return {
         text: formatRmb(avgAmountPerSession),
         isPositive: avgAmountPerSession >= 0,
+      };
+    case 'roi':
+      return {
+        text: formatSignedPercent(roi),
+        isPositive: roi >= 0,
+      };
+    case 'winRate':
+      return {
+        text: formatSignedPercent(winRate),
+        isPositive: winRate >= 0,
       };
     case 'profit':
     default:
@@ -54,4 +60,3 @@ export function getLeaderboardMetric(row, metric = 'profit') {
       };
   }
 }
-

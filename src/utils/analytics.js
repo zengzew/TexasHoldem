@@ -120,9 +120,10 @@ export function sortLeaderboardRows(rows, metric = 'profit') {
 
   const sorters = {
     profit: (a, b) => b.totalProfit - a.totalProfit || b.totalSessions - a.totalSessions,
-    roi: (a, b) => b.roi - a.roi || b.totalProfit - a.totalProfit,
-    efficiency: (a, b) => b.avgAmountPerSession - a.avgAmountPerSession || b.amountRmb - a.amountRmb,
+    avgProfit: (a, b) => b.avgProfitPerSession - a.avgProfitPerSession || b.totalProfit - a.totalProfit,
     amount: (a, b) => b.amountRmb - a.amountRmb || b.totalProfit - a.totalProfit,
+    efficiency: (a, b) => b.avgAmountPerSession - a.avgAmountPerSession || b.amountRmb - a.amountRmb,
+    roi: (a, b) => b.roi - a.roi || b.totalProfit - a.totalProfit,
     winRate: (a, b) => b.winRate - a.winRate || b.totalProfit - a.totalProfit,
   };
 

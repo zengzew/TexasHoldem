@@ -42,7 +42,7 @@ describe('analytics utils', () => {
     expect(a?.amountRmb).toBe(20);
   });
 
-  it('supports sort metric amount and winRate', () => {
+  it('supports sort metric avgProfit, amount, avgAmount and winRate', () => {
     const rows = [
       {
         playerId: 'a',
@@ -76,6 +76,7 @@ describe('analytics utils', () => {
       },
     ];
 
+    expect(sortLeaderboardRows(rows, 'avgProfit').map((row) => row.playerId)).toEqual(['a', 'b', 'c']);
     expect(sortLeaderboardRows(rows, 'amount').map((row) => row.playerId)).toEqual(['c', 'a', 'b']);
     expect(sortLeaderboardRows(rows, 'winRate').map((row) => row.playerId)).toEqual(['b', 'a', 'c']);
     expect(sortLeaderboardRows(rows, 'efficiency').map((row) => row.playerId)).toEqual(['c', 'a', 'b']);

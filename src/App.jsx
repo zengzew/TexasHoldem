@@ -3540,10 +3540,16 @@ export default function App() {
             净盈利
           </button>
           <button
-            className={`${leaderboardView === 'roi' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('roi')}
+            className={`${leaderboardView === 'avgProfit' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[106px] whitespace-nowrap`}
+            onClick={() => setLeaderboardView('avgProfit')}
           >
-            ROI
+            场均盈利
+          </button>
+          <button
+            className={`${leaderboardView === 'amount' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
+            onClick={() => setLeaderboardView('amount')}
+          >
+            金额
           </button>
           <button
             className={`${leaderboardView === 'efficiency' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[106px] whitespace-nowrap`}
@@ -3552,10 +3558,10 @@ export default function App() {
             场均金额
           </button>
           <button
-            className={`${leaderboardView === 'amount' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('amount')}
+            className={`${leaderboardView === 'roi' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
+            onClick={() => setLeaderboardView('roi')}
           >
-            金额
+            ROI
           </button>
           <button
             className={`${leaderboardView === 'winRate' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
@@ -3639,6 +3645,12 @@ export default function App() {
                       <p>净盈利</p>
                       <p className={`mt-0.5 font-semibold ${p.totalProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                         {toChips(p.totalProfit)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                      <p>场均盈利</p>
+                      <p className={`mt-0.5 font-semibold ${p.avgProfitPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {toChips(p.avgProfitPerSession)}
                       </p>
                     </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">

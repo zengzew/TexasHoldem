@@ -4,6 +4,7 @@ import { getLeaderboardMetric } from './leaderboardMetric';
 describe('leaderboard metric formatting', () => {
   const baseRow = {
     totalProfit: 7700,
+    avgProfitPerSession: 3850,
     roi: 465,
     amountRmb: 242,
     winRate: 50,
@@ -20,6 +21,13 @@ describe('leaderboard metric formatting', () => {
   it('formats amount rows as RMB', () => {
     expect(getLeaderboardMetric(baseRow, 'amount')).toEqual({
       text: '¥242.00',
+      isPositive: true,
+    });
+  });
+
+  it('formats avg profit rows as chips', () => {
+    expect(getLeaderboardMetric(baseRow, 'avgProfit')).toEqual({
+      text: '3850',
       isPositive: true,
     });
   });
