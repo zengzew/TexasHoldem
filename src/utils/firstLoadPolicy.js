@@ -54,3 +54,17 @@ export function deriveInvalidationPlan(action) {
 export function shouldRefreshSettledViews({ previousSettledCount, nextSettledCount }) {
   return Number(previousSettledCount || 0) !== Number(nextSettledCount || 0);
 }
+
+export function shouldRefreshLeaderboardViews({ previousSignature, nextSignature }) {
+  return shouldRefreshSettledViews({
+    previousSettledCount: previousSignature?.settledCount,
+    nextSettledCount: nextSignature?.settledCount,
+  });
+}
+
+export function shouldRefreshHistoryViews({ previousSignature, nextSignature }) {
+  return (
+    Number(previousSignature?.totalCount || 0) !== Number(nextSignature?.totalCount || 0) ||
+    Number(previousSignature?.settledCount || 0) !== Number(nextSignature?.settledCount || 0)
+  );
+}

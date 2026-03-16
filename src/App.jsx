@@ -8,6 +8,8 @@ import { getLeaderboardMetric } from './utils/leaderboardMetric';
 import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
+  shouldRefreshHistoryViews,
+  shouldRefreshLeaderboardViews,
   shouldRefreshSettledViews,
   shouldLoadPlayerDirectory,
   shouldLoadTabData,
@@ -321,6 +323,8 @@ export default function App() {
   const leaderboardLoadedRef = useRef(false);
   const historyLoadedRef = useRef(false);
   const roomStatusRef = useRef(roomStatus);
+  const leaderboardFreshnessRef = useRef({ settledCount: 0 });
+  const historyFreshnessRef = useRef({ totalCount: 0, settledCount: 0 });
   const settleInFlightRef = useRef(false);
   const confirmInFlightPlayerIdsRef = useRef(new Set());
   const actionLockRef = useRef(false);
@@ -838,6 +842,50 @@ export default function App() {
     }
   }
 
+  async function loadDatasetFreshness(options = {}) {
+    const { leaderboard = false, history = false } = options;
+    const result = {};
+    const tasks = [];
+
+    if (leaderboard) {
+      tasks.push(
+        supabase
+          .from('sessions')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'settled')
+          .then(({ count, error }) => {
+            if (error) throw error;
+            result.leaderboard = { settledCount: Number(count || 0) };
+          })
+      );
+    }
+
+    if (history && user?.id) {
+      tasks.push(
+        Promise.all([
+          supabase.from('room_players').select('room_id').eq('player_id', user.id).limit(5000),
+          supabase.from('session_players').select('session_id').eq('player_id', user.id).limit(5000),
+        ]).then(([roomResult, settledResult]) => {
+          if (roomResult.error) throw roomResult.error;
+          if (settledResult.error) throw settledResult.error;
+          const allSessionIds = new Set([
+            ...(roomResult.data || []).map((row) => row.room_id),
+            ...(settledResult.data || []).map((row) => row.session_id),
+          ]);
+          result.history = {
+            totalCount: allSessionIds.size,
+            settledCount: Number((settledResult.data || []).length),
+          };
+        })
+      );
+    }
+
+    if (tasks.length) {
+      await Promise.all(tasks);
+    }
+    return result;
+  }
+
   async function loadLeaderboard(options = {}) {
     const { force = false } = options;
     if (!force && leaderboardLoaded) return leaderboardRows;
@@ -898,6 +946,7 @@ export default function App() {
         };
       });
 
+      leaderboardFreshnessRef.current = { settledCount: sessionIds.length };
       setLeaderboardRows(mapped);
       setLeaderboardLoaded(true);
       return mapped;
@@ -1208,6 +1257,10 @@ export default function App() {
         transfers: transfersBySession.get(s.id) || [],
       }));
 
+      historyFreshnessRef.current = {
+        totalCount: history.length,
+        settledCount: history.filter((session) => session.status === 'settled').length,
+      };
       setHistorySessions(history);
       setExpandedHistoryId((prev) => (history.some((item) => item.id === prev) ? prev : ''));
       setHistoryLoaded(true);
@@ -1224,20 +1277,49 @@ export default function App() {
   }
 
   async function refreshLazyDatasets(options = {}) {
-    const { leaderboard = false, history = false } = options;
+    const { leaderboard = false, history = false, guardByFreshness = false } = options;
     const tasks = [];
     const currentTab = activeTabRef.current;
+    let freshness = null;
+
+    const shouldConsiderLeaderboard = leaderboard && (currentTab === 'leaderboard' || leaderboardLoadedRef.current);
+    const shouldConsiderHistory = history && (currentTab === 'history' || historyLoadedRef.current);
+
+    if (guardByFreshness && (shouldConsiderLeaderboard || shouldConsiderHistory)) {
+      freshness = await loadDatasetFreshness({
+        leaderboard: shouldConsiderLeaderboard,
+        history: shouldConsiderHistory,
+      });
+    }
 
     if (leaderboard) {
-      invalidateLazyData({ leaderboard: true });
-      if (currentTab === 'leaderboard' || leaderboardLoadedRef.current) {
+      const canRefresh =
+        !guardByFreshness ||
+        !shouldConsiderLeaderboard ||
+        shouldRefreshLeaderboardViews({
+          previousSignature: leaderboardFreshnessRef.current,
+          nextSignature: freshness?.leaderboard,
+        });
+      if (canRefresh) {
+        invalidateLazyData({ leaderboard: true });
+      }
+      if (canRefresh && shouldConsiderLeaderboard) {
         tasks.push(loadLeaderboard({ force: true }));
       }
     }
 
     if (history) {
-      invalidateLazyData({ history: true });
-      if (currentTab === 'history' || historyLoadedRef.current) {
+      const canRefresh =
+        !guardByFreshness ||
+        !shouldConsiderHistory ||
+        shouldRefreshHistoryViews({
+          previousSignature: historyFreshnessRef.current,
+          nextSignature: freshness?.history,
+        });
+      if (canRefresh) {
+        invalidateLazyData({ history: true });
+      }
+      if (canRefresh && shouldConsiderHistory) {
         tasks.push(loadHistorySessions({ force: true }));
       }
     }
@@ -1746,7 +1828,7 @@ export default function App() {
       setDissolveConfirmOpen(false);
       showNotice('房间已解散', 'success');
       await loadOpenRooms();
-      await refreshLazyDatasets({ leaderboard: true, history: true });
+      await refreshLazyDatasets({ leaderboard: true, history: true, guardByFreshness: true });
     } finally {
       setIsDissolving(false);
     }

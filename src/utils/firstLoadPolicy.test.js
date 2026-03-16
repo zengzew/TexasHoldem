@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
+  shouldRefreshHistoryViews,
+  shouldRefreshLeaderboardViews,
   shouldRefreshSettledViews,
   shouldLoadPlayerDirectory,
   shouldLoadTabData,
@@ -97,5 +99,44 @@ describe('firstLoadPolicy', () => {
     expect(shouldRefreshSettledViews({ previousSettledCount: 3, nextSettledCount: 3 })).toBe(false);
     expect(shouldRefreshSettledViews({ previousSettledCount: 3, nextSettledCount: 4 })).toBe(true);
     expect(shouldRefreshSettledViews({ previousSettledCount: 0, nextSettledCount: 1 })).toBe(true);
+  });
+
+  it('refreshes leaderboard only when settled-session freshness changes', () => {
+    expect(
+      shouldRefreshLeaderboardViews({
+        previousSignature: { settledCount: 4 },
+        nextSignature: { settledCount: 4 },
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRefreshLeaderboardViews({
+        previousSignature: { settledCount: 4 },
+        nextSignature: { settledCount: 5 },
+      })
+    ).toBe(true);
+  });
+
+  it('refreshes history when either total or settled participated sessions change', () => {
+    expect(
+      shouldRefreshHistoryViews({
+        previousSignature: { totalCount: 5, settledCount: 4 },
+        nextSignature: { totalCount: 5, settledCount: 4 },
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRefreshHistoryViews({
+        previousSignature: { totalCount: 5, settledCount: 4 },
+        nextSignature: { totalCount: 6, settledCount: 4 },
+      })
+    ).toBe(true);
+
+    expect(
+      shouldRefreshHistoryViews({
+        previousSignature: { totalCount: 5, settledCount: 4 },
+        nextSignature: { totalCount: 5, settledCount: 5 },
+      })
+    ).toBe(true);
   });
 });
