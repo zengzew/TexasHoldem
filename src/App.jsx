@@ -4,6 +4,7 @@ import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
 import { buildBuyInEventPayload, normalizeBuyInEvents } from './utils/buyInHistory';
+import { LEADERBOARD_BENCHMARKS } from './utils/leaderboardBenchmarks';
 import { getLeaderboardMetric } from './utils/leaderboardMetric';
 import {
   deriveInitialLoadPlan,
@@ -165,48 +166,6 @@ function CalendarIcon() {
   );
 }
 
-function WinRateRing({ value = 0 }) {
-  const safe = Math.max(0, Math.min(100, Number(value || 0)));
-  const radius = 17;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference * (1 - safe / 100);
-
-  return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/72 px-2.5 py-1.5">
-      <svg viewBox="0 0 40 40" className="h-9 w-9" aria-hidden>
-        <circle cx="20" cy="20" r={radius} stroke="rgba(148,163,184,0.25)" strokeWidth="3.5" fill="none" />
-        <circle
-          cx="20"
-          cy="20"
-          r={radius}
-          stroke="url(#win-rate-gradient)"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          fill="none"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          className="win-rate-ring-progress"
-          transform="rotate(-90 20 20)"
-        />
-        <defs>
-          <linearGradient id="win-rate-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#4f46e5" />
-            <stop offset="60%" stopColor="#3b82f6" />
-            <stop offset="100%" stopColor="#22d3ee" />
-          </linearGradient>
-        </defs>
-      </svg>
-      <div className="leading-none">
-        <p className="text-[10px] text-slate-500">胜率</p>
-        <p className="num mt-1 text-xs font-semibold text-slate-800">
-          {safe > 0 ? '+' : ''}
-          {safe.toFixed(1)}%
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function padDatePart(value) {
   return String(value).padStart(2, '0');
 }
@@ -337,6 +296,7 @@ export default function App() {
   const buyInHistoryPopoverRef = useRef(null);
   const buyInHistoryTriggerRef = useRef(null);
   const profileNameCacheRef = useRef(new Map());
+  const historyTransferRefreshTimerRef = useRef(null);
   const BUY_IN_STEP = 2000;
   const HISTORY_PAGE_SIZE = 5;
   const LEADERBOARD_COLLAPSED_COUNT = leaderboardCollapsedCount;
@@ -680,6 +640,17 @@ export default function App() {
   function persistJoinedRoomForCurrentUser(nextRoomId) {
     if (!user?.id) return;
     savePersistedJoinedRoom(user.id, nextRoomId, null);
+  }
+
+  function scheduleHistoryTransferRefresh() {
+    if (historyTransferRefreshTimerRef.current) {
+      clearTimeout(historyTransferRefreshTimerRef.current);
+    }
+    historyTransferRefreshTimerRef.current = window.setTimeout(() => {
+      historyTransferRefreshTimerRef.current = null;
+      if (!(activeTabRef.current === 'history' || historyLoadedRef.current)) return;
+      loadHistorySessions({ force: true }).catch((err) => showNotice(err.message, 'error'));
+    }, 250);
   }
 
   function cacheProfileNames(rows) {
@@ -1554,7 +1525,7 @@ export default function App() {
         },
         async () => {
           await loadRoom(targetRoomId);
-          await refreshLazyDatasets({ history: true });
+          scheduleHistoryTransferRefresh();
         }
       )
       .subscribe();
@@ -2567,6 +2538,9 @@ export default function App() {
 
     return () => {
       mounted = false;
+      if (historyTransferRefreshTimerRef.current) {
+        clearTimeout(historyTransferRefreshTimerRef.current);
+      }
       listener?.subscription?.unsubscribe();
       if (roomChannelRef.current) {
         supabase.removeChannel(roomChannelRef.current);
@@ -3271,39 +3245,41 @@ export default function App() {
                     </button>
                   )}
                 </div>
-                <div className="relative mb-2 flex items-center gap-2 text-xs font-medium text-slate-500">
-                  <p className="min-w-0">
-                    累计总买入：
-                    <AnimatedNumber
-                      className="ml-1 font-semibold text-slate-700"
-                      value={toNonNegativeChipInt(p.buy_in)}
-                      format={(n) => toChips(n)}
-                    />{' '}
-                    积分
-                  </p>
-                  <div className="shrink-0">
-                    <button
-                      type="button"
-                      aria-label="查看买入记录"
-                      className="info-trigger"
-                      ref={buyInHistoryOpen ? buyInHistoryTriggerRef : null}
-                      onClick={async () => {
-                        if (!buyInHistoryKey) return;
-                        if (buyInHistoryOpen) {
-                          setOpenBuyInHistoryKey('');
-                          return;
-                        }
-                        setOpenBuyInHistoryKey(buyInHistoryKey);
-                        try {
-                          await loadBuyInHistory(joinedRoomId, p.player_id);
-                        } catch (err) {
-                          setOpenBuyInHistoryKey('');
-                          showNotice(err.message, 'error');
-                        }
-                      }}
-                    >
-                      <InfoCircleIcon />
-                    </button>
+                <div className="relative mb-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+                    <p className="min-w-0">
+                      累计总买入：
+                      <AnimatedNumber
+                        className="ml-1 font-semibold text-slate-700"
+                        value={toNonNegativeChipInt(p.buy_in)}
+                        format={(n) => toChips(n)}
+                      />{' '}
+                      积分
+                    </p>
+                    <div className="shrink-0">
+                      <button
+                        type="button"
+                        aria-label="查看买入记录"
+                        className="info-trigger"
+                        ref={buyInHistoryOpen ? buyInHistoryTriggerRef : null}
+                        onClick={async () => {
+                          if (!buyInHistoryKey) return;
+                          if (buyInHistoryOpen) {
+                            setOpenBuyInHistoryKey('');
+                            return;
+                          }
+                          setOpenBuyInHistoryKey(buyInHistoryKey);
+                          try {
+                            await loadBuyInHistory(joinedRoomId, p.player_id);
+                          } catch (err) {
+                            setOpenBuyInHistoryKey('');
+                            showNotice(err.message, 'error');
+                          }
+                        }}
+                      >
+                        <InfoCircleIcon />
+                      </button>
+                    </div>
                   </div>
                   {buyInHistoryOpen && (
                     <div
@@ -3533,42 +3509,15 @@ export default function App() {
         <div className="mt-2 w-full">{renderDatePopover()}</div>
         <div className="tab-scroll segmented-shell relative mt-3 min-h-[3.3rem] overflow-x-auto p-1">
           <div className="relative z-[1] inline-flex min-w-full gap-2 pr-1">
-          <button
-            className={`${leaderboardView === 'profit' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('profit')}
-          >
-            净盈利
-          </button>
-          <button
-            className={`${leaderboardView === 'avgProfit' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[106px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('avgProfit')}
-          >
-            场均盈利
-          </button>
-          <button
-            className={`${leaderboardView === 'amount' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('amount')}
-          >
-            金额
-          </button>
-          <button
-            className={`${leaderboardView === 'efficiency' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[106px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('efficiency')}
-          >
-            场均金额
-          </button>
-          <button
-            className={`${leaderboardView === 'roi' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('roi')}
-          >
-            ROI
-          </button>
-          <button
-            className={`${leaderboardView === 'winRate' ? 'btn-primary' : 'btn-secondary'} min-h-[44px] min-w-[94px] whitespace-nowrap`}
-            onClick={() => setLeaderboardView('winRate')}
-          >
-            胜率
-          </button>
+          {LEADERBOARD_BENCHMARKS.map((benchmark) => (
+            <button
+              key={benchmark.key}
+              className={`${leaderboardView === benchmark.key ? 'btn-primary' : 'btn-secondary'} min-h-[44px] ${benchmark.minWidthClass} whitespace-nowrap`}
+              onClick={() => setLeaderboardView(benchmark.key)}
+            >
+              {benchmark.label}
+            </button>
+          ))}
           </div>
         </div>
           <div key={leaderboardRenderKey} className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
@@ -3584,9 +3533,10 @@ export default function App() {
             return (
               <article
                 key={`${leaderboardView}-${p.playerId}-${p.displayRank}`}
-                className={`rounded-2xl border bg-white/90 p-3.5 ${
+                className={`leaderboard-fade-up rounded-2xl border bg-white/90 p-3.5 ${
                   mine ? 'border-sky-300 ring-2 ring-sky-100' : 'border-slate-200'
                 }`}
+                style={{ animationDelay: `${Math.min(p.displayRank - 1, 5) * 35}ms` }}
               >
                 <button
                   type="button"
@@ -3671,9 +3621,6 @@ export default function App() {
                         {p.roi > 0 ? '+' : ''}
                         {p.roi.toFixed(1)}%
                       </p>
-                    </div>
-                    <div className="sm:col-span-3">
-                      <WinRateRing value={p.winRate} />
                     </div>
                   </div>
                 )}

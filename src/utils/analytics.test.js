@@ -42,7 +42,7 @@ describe('analytics utils', () => {
     expect(a?.amountRmb).toBe(20);
   });
 
-  it('supports sort metric avgProfit, amount, avgAmount and winRate', () => {
+  it('supports sort metric avgProfit, amount, avgAmount and winRate in analytics utilities', () => {
     const rows = [
       {
         playerId: 'a',
