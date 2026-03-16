@@ -8,6 +8,7 @@ import { getLeaderboardMetric } from './utils/leaderboardMetric';
 import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
+  shouldLoadRoomPlayerDetails,
   shouldRefreshHistoryViews,
   shouldRefreshLeaderboardViews,
   shouldRefreshSettledViews,
@@ -306,6 +307,8 @@ export default function App() {
   const [profileDirectory, setProfileDirectory] = useState([]);
   const [profileDirectoryLoaded, setProfileDirectoryLoaded] = useState(false);
   const [profileDirectoryLoading, setProfileDirectoryLoading] = useState(false);
+  const [roomPlayerDetailsLoaded, setRoomPlayerDetailsLoaded] = useState(false);
+  const [roomPlayerDetailsLoading, setRoomPlayerDetailsLoading] = useState(false);
   const [addPlayerFocus, setAddPlayerFocus] = useState(false);
   const [addPlayerRemoteSuggestions, setAddPlayerRemoteSuggestions] = useState([]);
   const [isSearchingPlayers, setIsSearchingPlayers] = useState(false);
@@ -333,6 +336,7 @@ export default function App() {
   const prevTabRef = useRef('room');
   const buyInHistoryPopoverRef = useRef(null);
   const buyInHistoryTriggerRef = useRef(null);
+  const profileNameCacheRef = useRef(new Map());
   const BUY_IN_STEP = 2000;
   const HISTORY_PAGE_SIZE = 5;
   const LEADERBOARD_COLLAPSED_COUNT = leaderboardCollapsedCount;
@@ -678,6 +682,17 @@ export default function App() {
     savePersistedJoinedRoom(user.id, nextRoomId, null);
   }
 
+  function cacheProfileNames(rows) {
+    if (!Array.isArray(rows) || !rows.length) return;
+    const next = new Map(profileNameCacheRef.current);
+    rows.forEach((row) => {
+      if (row?.id && row?.nickname) {
+        next.set(row.id, row.nickname);
+      }
+    });
+    profileNameCacheRef.current = next;
+  }
+
   function normalizePasswordLegacy(rawPassword) {
     const base = String(rawPassword || '');
     if (!base) return '';
@@ -826,6 +841,7 @@ export default function App() {
       resolvedName = existing.nickname;
     }
 
+    cacheProfileNames([{ id: currentUser.id, nickname: resolvedName }]);
     setProfileName(resolvedName);
     setNewNickname(resolvedName);
   }
@@ -925,12 +941,13 @@ export default function App() {
       const playerIds = [...new Set((rows || []).map((row) => row.player_id).filter(Boolean))];
       let names = new Map();
       if (playerIds.length) {
-        const { data: profiles, error: profileErr } = await supabase
-          .from('profiles')
-          .select('id,nickname,total_games,winning_games')
-          .in('id', playerIds);
-        if (profileErr) throw profileErr;
-        names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
+      const { data: profiles, error: profileErr } = await supabase
+        .from('profiles')
+        .select('id,nickname,total_games,winning_games')
+        .in('id', playerIds);
+      if (profileErr) throw profileErr;
+      cacheProfileNames(profiles || []);
+      names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
       }
 
       const mapped = (rows || []).map((row) => {
@@ -971,6 +988,7 @@ export default function App() {
       const { data, error } = await supabase.from('profiles').select('id,nickname').limit(5000);
       if (error) throw error;
       const nextProfiles = data || [];
+      cacheProfileNames(nextProfiles);
       setProfileDirectory(nextProfiles);
       setProfileDirectoryLoaded(true);
       return nextProfiles;
@@ -1082,6 +1100,7 @@ export default function App() {
         .select('id,nickname')
         .in('id', ownerIds);
       if (ownerProfilesErr) throw ownerProfilesErr;
+      cacheProfileNames(ownerProfiles || []);
       ownerNames = new Map((ownerProfiles || []).map((row) => [row.id, row.nickname]));
     }
 
@@ -1214,11 +1233,12 @@ export default function App() {
       let names = new Map();
       const ids = Array.from(playerIds);
       if (ids.length) {
-        const { data: profiles, error: profileErr } = await supabase
+      const { data: profiles, error: profileErr } = await supabase
           .from('profiles')
           .select('id,nickname')
           .in('id', ids);
         if (profileErr) throw profileErr;
+        cacheProfileNames(profiles || []);
         names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
       }
 
@@ -1345,43 +1365,11 @@ export default function App() {
     });
   }
 
-  async function loadRoom(targetRoomId) {
+  async function loadRoom(targetRoomId, options = {}) {
     if (!targetRoomId) return;
+    const { includeAllProfiles } = options;
     setOpenBuyInHistoryKey('');
     setBuyInHistoryLoadingKey('');
-
-    const { data: roomRows, error } = await supabase
-      .from('room_players')
-      .select('room_id,player_id,buy_in,final_chips,updated_at')
-      .eq('room_id', targetRoomId)
-      .order('updated_at', { ascending: true });
-
-    if (error) throw error;
-
-    const ids = [...new Set((roomRows || []).map((r) => r.player_id))];
-    let names = new Map();
-
-    if (ids.length) {
-      const { data: profiles, error: profileErr } = await supabase
-        .from('profiles')
-        .select('id,nickname')
-        .in('id', ids);
-      if (profileErr) throw profileErr;
-      names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
-    }
-
-    const mapped = (roomRows || []).map((r) => ({
-      ...r,
-      buy_in: toNonNegativeChipInt(r.buy_in),
-      final_chips: r.final_chips == null ? null : toNonNegativeChipInt(r.final_chips),
-      nickname: names.get(r.player_id) || 'Unknown',
-      net:
-        r.final_chips == null
-          ? null
-          : Math.round(Number(r.final_chips || 0) - Number(r.buy_in || 0)),
-    }));
-
-    setPlayers(mapped);
 
     let session = null;
     if (ownerFeatureEnabled) {
@@ -1450,6 +1438,51 @@ export default function App() {
 
     if (transferError) throw transferError;
 
+    const { data: roomRows, error } = await supabase
+      .from('room_players')
+      .select('room_id,player_id,buy_in,final_chips,updated_at')
+      .eq('room_id', targetRoomId)
+      .order('updated_at', { ascending: true });
+
+    if (error) throw error;
+
+    const ids = [...new Set((roomRows || []).map((row) => row.player_id).filter(Boolean))];
+    const shouldIncludeAllProfiles =
+      includeAllProfiles ??
+      Boolean(!showMineOnly || roomPlayerDetailsLoaded || session?.status === 'settled' || (roomTransfers || []).length);
+    const minimalIds = [...new Set([user?.id, ownerFeatureEnabled ? session?.owner_id : '', roomOwnerId].filter(Boolean))];
+    const profileIdsToLoad = shouldIncludeAllProfiles ? ids : ids.filter((id) => minimalIds.includes(id));
+    const names = new Map(profileNameCacheRef.current);
+
+    if (profileIdsToLoad.length) {
+      const { data: profiles, error: profileErr } = await supabase
+        .from('profiles')
+        .select('id,nickname')
+        .in('id', profileIdsToLoad);
+      if (profileErr) throw profileErr;
+      cacheProfileNames(profiles || []);
+      (profiles || []).forEach((profile) => {
+        if (profile?.id && profile?.nickname) {
+          names.set(profile.id, profile.nickname);
+        }
+      });
+    }
+
+    const mapped = (roomRows || []).map((row) => ({
+      ...row,
+      buy_in: toNonNegativeChipInt(row.buy_in),
+      final_chips: row.final_chips == null ? null : toNonNegativeChipInt(row.final_chips),
+      nickname: names.get(row.player_id) || `玩家 ${String(row.player_id || '').slice(0, 6)}`,
+      net:
+        row.final_chips == null
+          ? null
+          : Math.round(Number(row.final_chips || 0) - Number(row.buy_in || 0)),
+    }));
+
+    setPlayers(mapped);
+    setRoomPlayerDetailsLoaded(shouldIncludeAllProfiles);
+    setRoomPlayerDetailsLoading(false);
+
     setTransfers(
       (roomTransfers || []).map((t) => ({
         fromPlayerId: t.from_player_id,
@@ -1457,6 +1490,16 @@ export default function App() {
         amount: toNonNegativeChipInt(t.amount),
       }))
     );
+  }
+
+  async function loadRoomPlayerDetails(targetRoomId = joinedRoomId) {
+    if (!targetRoomId || roomPlayerDetailsLoading) return;
+    setRoomPlayerDetailsLoading(true);
+    try {
+      await loadRoom(targetRoomId, { includeAllProfiles: true });
+    } finally {
+      setRoomPlayerDetailsLoading(false);
+    }
   }
 
   async function subscribeRoom(targetRoomId) {
@@ -1530,6 +1573,8 @@ export default function App() {
     setConfirmingPlayerIds({});
     setJoinedRoomId(nextRoomId);
     setRoomId(nextRoomId);
+    setRoomPlayerDetailsLoaded(false);
+    setRoomPlayerDetailsLoading(false);
     persistJoinedRoomForCurrentUser(nextRoomId);
     await subscribeRoom(nextRoomId);
     await loadRoom(nextRoomId);
@@ -1786,6 +1831,8 @@ export default function App() {
       setTransfers([]);
       setRoomStatus('active');
       setRoomOwnerId('');
+      setRoomPlayerDetailsLoaded(false);
+      setRoomPlayerDetailsLoading(false);
       setBuyInDrafts({});
       setFinalChipsDrafts({});
       confirmInFlightPlayerIdsRef.current.clear();
@@ -2425,6 +2472,8 @@ export default function App() {
     setProfileDirectory([]);
     setProfileDirectoryLoaded(false);
     setProfileDirectoryLoading(false);
+    setRoomPlayerDetailsLoaded(false);
+    setRoomPlayerDetailsLoading(false);
     setDissolveConfirmOpen(false);
     setIsDissolving(false);
     setAccountMenuOpen(false);
@@ -2467,6 +2516,8 @@ export default function App() {
     setTransfers([]);
     setRoomStatus('active');
     setRoomOwnerId('');
+    setRoomPlayerDetailsLoaded(false);
+    setRoomPlayerDetailsLoading(false);
     setRmbPer2000(DEFAULT_RMB_PER_2000);
     setRmbPer2000Draft(String(DEFAULT_RMB_PER_2000));
     setBuyInHistoryByKey({});
@@ -2623,6 +2674,21 @@ export default function App() {
     profileDirectoryLoaded,
     profileDirectoryLoading,
   ]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !user) return;
+    if (
+      !shouldLoadRoomPlayerDetails({
+        hasJoinedRoom: Boolean(joinedRoomId),
+        showMineOnly,
+        loaded: roomPlayerDetailsLoaded,
+        loading: roomPlayerDetailsLoading,
+      })
+    ) {
+      return;
+    }
+    loadRoomPlayerDetails().catch((err) => showNotice(err.message, 'error'));
+  }, [user, joinedRoomId, showMineOnly, roomPlayerDetailsLoaded, roomPlayerDetailsLoading]);
 
   useEffect(() => {
     setExpandedLeaderboardId((prev) => (visibleLeaderboard.some((item) => item.playerId === prev) ? prev : ''));

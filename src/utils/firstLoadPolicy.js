@@ -22,6 +22,10 @@ export function shouldLoadPlayerDirectory({
   return Boolean(hasJoinedRoom && amRoomOwner && !showMineOnly && focused && !loaded && !loading);
 }
 
+export function shouldLoadRoomPlayerDetails({ hasJoinedRoom, showMineOnly, loaded, loading }) {
+  return Boolean(hasJoinedRoom && !showMineOnly && !loaded && !loading);
+}
+
 export function deriveInvalidationPlan(action) {
   switch (action) {
     case 'add-player':

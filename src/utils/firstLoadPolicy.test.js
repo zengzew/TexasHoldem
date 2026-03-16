@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
+  shouldLoadRoomPlayerDetails,
   shouldRefreshHistoryViews,
   shouldRefreshLeaderboardViews,
   shouldRefreshSettledViews,
@@ -74,6 +75,35 @@ describe('firstLoadPolicy', () => {
         showMineOnly: false,
         focused: true,
         loaded: false,
+        loading: false,
+      })
+    ).toBe(false);
+  });
+
+  it('loads room player details only when switching to all-player mode', () => {
+    expect(
+      shouldLoadRoomPlayerDetails({
+        hasJoinedRoom: true,
+        showMineOnly: false,
+        loaded: false,
+        loading: false,
+      })
+    ).toBe(true);
+
+    expect(
+      shouldLoadRoomPlayerDetails({
+        hasJoinedRoom: true,
+        showMineOnly: true,
+        loaded: false,
+        loading: false,
+      })
+    ).toBe(false);
+
+    expect(
+      shouldLoadRoomPlayerDetails({
+        hasJoinedRoom: true,
+        showMineOnly: false,
+        loaded: true,
         loading: false,
       })
     ).toBe(false);
