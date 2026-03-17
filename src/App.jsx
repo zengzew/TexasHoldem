@@ -17,6 +17,14 @@ import {
   shouldLoadTabData,
 } from './utils/firstLoadPolicy';
 import { clearPersistedJoinedRoom, loadPersistedJoinedRoom, savePersistedJoinedRoom } from './utils/roomState';
+import {
+  clearHistoryCache,
+  clearLeaderboardCache,
+  loadHistoryCache,
+  loadLeaderboardCache,
+  saveHistoryCache,
+  saveLeaderboardCache,
+} from './utils/tabCache';
 import { buildLeftMatchSuggestions, findBestProfileForAdd } from './utils/playerSearch';
 import { getBuyInPopoverClassName } from './utils/buyInPopover';
 import ownerCrownIcon from './assets/owner-crown.svg';
@@ -664,6 +672,33 @@ export default function App() {
     profileNameCacheRef.current = next;
   }
 
+  function hydrateCachedTabData(userId) {
+    const leaderboardCache = loadLeaderboardCache(userId);
+    if (leaderboardCache && Array.isArray(leaderboardCache.rows)) {
+      leaderboardFreshnessRef.current = leaderboardCache.freshness || { settledCount: 0 };
+      setLeaderboardRows(leaderboardCache.rows);
+      setLeaderboardLoaded(true);
+    } else {
+      leaderboardFreshnessRef.current = { settledCount: 0 };
+      setLeaderboardRows([]);
+      setLeaderboardLoaded(false);
+    }
+
+    const historyCache = loadHistoryCache(userId);
+    if (historyCache && Array.isArray(historyCache.sessions)) {
+      historyFreshnessRef.current = historyCache.freshness || { totalCount: 0, settledCount: 0, latestMarker: '' };
+      setHistorySessions(historyCache.sessions);
+      setHistoryLoaded(true);
+    } else {
+      historyFreshnessRef.current = { totalCount: 0, settledCount: 0, latestMarker: '' };
+      setHistorySessions([]);
+      setHistoryLoaded(false);
+    }
+
+    setExpandedHistoryId('');
+    setHistoryPage(1);
+  }
+
   function normalizePasswordLegacy(rawPassword) {
     const base = String(rawPassword || '');
     if (!base) return '';
@@ -928,6 +963,9 @@ export default function App() {
 
       const sessionIds = [...new Set((rows || []).map((row) => row.session_id).filter(Boolean))];
       if (!sessionIds.length || !(rows || []).length) {
+        const emptyPayload = { rows: [], freshness: { settledCount: 0 } };
+        leaderboardFreshnessRef.current = emptyPayload.freshness;
+        saveLeaderboardCache(user.id, emptyPayload);
         setLeaderboardRows([]);
         setLeaderboardLoaded(true);
         return [];
@@ -974,7 +1012,9 @@ export default function App() {
         };
       });
 
-      leaderboardFreshnessRef.current = { settledCount: sessionIds.length };
+      const nextFreshness = { settledCount: sessionIds.length };
+      leaderboardFreshnessRef.current = nextFreshness;
+      saveLeaderboardCache(user.id, { rows: mapped, freshness: nextFreshness });
       setLeaderboardRows(mapped);
       setLeaderboardLoaded(true);
       return mapped;
@@ -1147,6 +1187,9 @@ export default function App() {
         ...(settledRows || []).map((row) => row.session_id),
       ])];
       if (!memberSessionIds.length) {
+        const emptyPayload = { sessions: [], freshness: { totalCount: 0, settledCount: 0, latestMarker: '' } };
+        historyFreshnessRef.current = emptyPayload.freshness;
+        saveHistoryCache(user.id, emptyPayload);
         setHistorySessions([]);
         setExpandedHistoryId('');
         setHistoryPage(1);
@@ -1192,6 +1235,9 @@ export default function App() {
 
       const sessionIds = sessions.map((s) => s.id);
       if (!sessionIds.length) {
+        const emptyPayload = { sessions: [], freshness: { totalCount: 0, settledCount: 0, latestMarker: '' } };
+        historyFreshnessRef.current = emptyPayload.freshness;
+        saveHistoryCache(user.id, emptyPayload);
         setHistorySessions([]);
         setExpandedHistoryId('');
         setHistoryPage(1);
@@ -1288,7 +1334,7 @@ export default function App() {
         transfers: transfersBySession.get(s.id) || [],
       }));
 
-      historyFreshnessRef.current = {
+      const nextFreshness = {
         totalCount: history.length,
         settledCount: history.filter((session) => session.status === 'settled').length,
         latestMarker: (roomRows || []).reduce((latest, row) => {
@@ -1296,6 +1342,8 @@ export default function App() {
           return candidate > latest ? candidate : latest;
         }, ''),
       };
+      historyFreshnessRef.current = nextFreshness;
+      saveHistoryCache(user.id, { sessions: history, freshness: nextFreshness });
       setHistorySessions(history);
       setExpandedHistoryId((prev) => (history.some((item) => item.id === prev) ? prev : ''));
       setHistoryLoaded(true);
@@ -2450,6 +2498,8 @@ export default function App() {
     await supabase.auth.signOut();
     if (user?.id) {
       clearPersistedJoinedRoom(user.id);
+      clearLeaderboardCache(user.id);
+      clearHistoryCache(user.id);
     }
     if (roomChannelRef.current) {
       await supabase.removeChannel(roomChannelRef.current);
@@ -2470,9 +2520,11 @@ export default function App() {
     setLeaderboardRows([]);
     setLeaderboardLoaded(false);
     setLeaderboardLoading(false);
+    leaderboardFreshnessRef.current = { settledCount: 0 };
     setHistorySessions([]);
     setHistoryLoaded(false);
     setHistoryLoading(false);
+    historyFreshnessRef.current = { totalCount: 0, settledCount: 0, latestMarker: '' };
     setExpandedHistoryId('');
     setHistoryPage(1);
     setDatePreset('all');
@@ -2593,12 +2645,9 @@ export default function App() {
       try {
         await ensureProfile(user);
         invalidateLazyData({ leaderboard: true, history: true, profileDirectory: true });
-        setLeaderboardRows([]);
-        setHistorySessions([]);
-        setExpandedHistoryId('');
-        setHistoryPage(1);
         setProfileDirectory([]);
         setAddPlayerRemoteSuggestions([]);
+        hydrateCachedTabData(user.id);
         const initialLoadPlan = deriveInitialLoadPlan({
           persistedRoomId: loadPersistedJoinedRoom(user.id, null),
         });
