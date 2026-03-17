@@ -591,15 +591,6 @@ export default function App() {
     () => (showAllLeaderboard ? rankedLeaderboard : rankedLeaderboard.slice(0, LEADERBOARD_COLLAPSED_COUNT)),
     [rankedLeaderboard, showAllLeaderboard, LEADERBOARD_COLLAPSED_COUNT]
   );
-  const leaderboardRenderKey = useMemo(
-    () =>
-      [
-        leaderboardView,
-        showAllLeaderboard ? 'all' : 'top',
-        visibleLeaderboard.map((item) => `${item.playerId}:${item.displayRank}`).join('|'),
-      ].join('::'),
-    [leaderboardView, showAllLeaderboard, visibleLeaderboard]
-  );
   const filteredHistorySessions = useMemo(
     () => historySessions,
     [historySessions]
@@ -3608,7 +3599,7 @@ export default function App() {
           ))}
           </div>
         </div>
-          <div key={leaderboardRenderKey} className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
+          <div className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
           {!visibleLeaderboard.length && (
             <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">
               {leaderboardLoading && !leaderboardLoaded ? '积分榜加载中...' : '暂无数据'}
