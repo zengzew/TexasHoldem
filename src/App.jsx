@@ -6,6 +6,7 @@ import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLe
 import { buildBuyInEventPayload, buildInitialBuyInEventPayload, normalizeBuyInEvents } from './utils/buyInHistory';
 import { LEADERBOARD_BENCHMARKS } from './utils/leaderboardBenchmarks';
 import { getLeaderboardMetric } from './utils/leaderboardMetric';
+import { getAuthModePrimaryLabel, getAuthModeSecondaryLabel, shouldShowForgotPasswordLink } from './utils/authMode';
 import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
@@ -25,6 +26,7 @@ import {
   saveHistoryCache,
   saveLeaderboardCache,
 } from './utils/tabCache';
+import { buildForgotPasswordResult } from './utils/forgotPassword';
 import { buildLeftMatchSuggestions, findBestProfileForAdd } from './utils/playerSearch';
 import { getBuyInPopoverClassName } from './utils/buyInPopover';
 import ownerCrownIcon from './assets/owner-crown.svg';
@@ -2421,6 +2423,56 @@ export default function App() {
     }
   }
 
+  async function resetPassword() {
+    if (!beginAction()) return;
+    try {
+      const trimmedNickname = normalizeNickname(authNickname);
+      const prepared = buildForgotPasswordResult({
+        nickname: trimmedNickname,
+        password,
+      });
+      if (!prepared.ok && (prepared.code === 'MISSING_NICKNAME' || prepared.code === 'MISSING_PASSWORD')) {
+        showNotice(prepared.message, 'error');
+        return;
+      }
+
+      const nextPasswordForAuth = normalizePasswordLegacy(password);
+      const { error } = await supabase.rpc('reset_password_by_nickname', {
+        target_nickname: trimmedNickname,
+        next_password: nextPasswordForAuth,
+      });
+
+      if (error) {
+        if (isMissingFunctionError(error, 'reset_password_by_nickname')) {
+          throw createAppError('SCHEMA_OUTDATED', '数据库密码重置函数未更新，请在 Supabase 执行最新 supabase_schema.sql');
+        }
+
+        const normalizedMessage = String(error.message || '').toLowerCase();
+        const result = buildForgotPasswordResult({
+          nickname: trimmedNickname,
+          password,
+          errorCode: normalizedMessage.includes('user_not_found') ? 'USER_NOT_FOUND' : 'RESET_FAILED',
+        });
+        showNotice(result.message, 'error');
+        return;
+      }
+
+      const result = buildForgotPasswordResult({
+        nickname: trimmedNickname,
+        password,
+        success: true,
+      });
+      setAuthMode(result.nextMode);
+      setAuthNickname(result.nickname);
+      if (result.clearPassword) {
+        setPassword('');
+      }
+      showNotice(result.message, 'success');
+    } finally {
+      endAction();
+    }
+  }
+
   async function updateMyNickname() {
     setSettingsError('');
     const next = normalizeNickname(newNickname);
@@ -2869,41 +2921,42 @@ export default function App() {
           </label>
 
           <div className="mt-4">
-            {authMode === 'login' ? (
-              <button
-                onClick={async () => {
-                  try {
+            <button
+              onClick={async () => {
+                try {
+                  if (authMode === 'login') {
                     await signIn();
-                  } catch (err) {
-                    showNotice(err.message, 'error');
-                  }
-                }}
-                className="btn-primary w-full"
-              >
-                登录
-              </button>
-            ) : (
-              <button
-                onClick={async () => {
-                  try {
+                  } else if (authMode === 'register') {
                     await signUp();
-                  } catch (err) {
-                    showNotice(err.message, 'error');
+                  } else {
+                    await resetPassword();
                   }
-                }}
-                className="btn-primary w-full"
-              >
-                注册
-              </button>
-            )}
+                } catch (err) {
+                  showNotice(err.message, 'error');
+                }
+              }}
+              className="btn-primary w-full"
+            >
+              {getAuthModePrimaryLabel(authMode)}
+            </button>
           </div>
 
           <button
             className="btn-secondary mt-3 w-full"
             onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
           >
-            {authMode === 'login' ? '没有账号？去注册' : '已有账号？去登录'}
+            {getAuthModeSecondaryLabel(authMode)}
           </button>
+
+          {shouldShowForgotPasswordLink(authMode) && (
+            <button
+              type="button"
+              className="mt-3 w-full text-center text-sm font-medium text-sky-700 transition hover:text-sky-800"
+              onClick={() => setAuthMode('reset')}
+            >
+              忘记密码？
+            </button>
+          )}
 
         </section>
         {renderNotice()}

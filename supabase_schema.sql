@@ -341,6 +341,35 @@ $$;
 
 grant execute on function public.resolve_login_emails(text) to anon, authenticated;
 
+create or replace function public.reset_password_by_nickname(target_nickname text, next_password text)
+returns void
+language plpgsql
+security definer
+set search_path = public, auth, extensions
+as $$
+declare
+  v_user_id uuid;
+begin
+  select p.id
+  into v_user_id
+  from public.profiles p
+  where lower(p.nickname) = lower(target_nickname)
+  limit 1;
+
+  if v_user_id is null then
+    raise exception 'USER_NOT_FOUND';
+  end if;
+
+  update auth.users
+  set
+    encrypted_password = extensions.crypt(next_password, extensions.gen_salt('bf', 10)),
+    updated_at = now()
+  where id = v_user_id;
+end;
+$$;
+
+grant execute on function public.reset_password_by_nickname(text, text) to anon, authenticated;
+
 -- ------------------------------------------------------------------
 -- Policies
 -- ------------------------------------------------------------------
