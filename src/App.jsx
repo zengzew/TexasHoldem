@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { hasSupabaseConfig, supabase } from './supabase';
+import { hasSupabaseConfig, supabase, supabaseConfigError } from './supabase';
 import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
 import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLeaderboardRows } from './utils/analytics';
@@ -2801,15 +2801,22 @@ export default function App() {
   }, [welcomePulse]);
 
   if (!hasSupabaseConfig) {
+    const configMessage =
+      supabaseConfigError === 'INVALID_URL'
+        ? 'Supabase URL 配置无效，请确认 VITE_SUPABASE_URL 是完整的 https:// 项目地址。'
+        : supabaseConfigError === 'MISSING_ANON_KEY'
+          ? '缺少 Supabase 匿名 Key，请配置 VITE_SUPABASE_ANON_KEY。'
+          : '请先配置 Supabase 环境变量：';
+
     return (
       <main className="safe-area-bottom w-full px-3 py-4 sm:px-4 md:mx-auto md:max-w-6xl md:py-8">
         <section className="glass-card rounded-3xl p-4 sm:p-6">
           <h1 className="text-3xl font-semibold tracking-tight text-ink">{APP_NAME}</h1>
-          <p className="mt-3 text-sm text-slate-600">请先配置 Supabase 环境变量：</p>
+          <p className="mt-3 text-sm text-slate-600">{configMessage}</p>
           <pre className="mt-3 overflow-x-auto rounded-2xl bg-slate-900 p-4 text-xs text-slate-100">
-            VITE_SUPABASE_URL=你的项目URL{`\n`}VITE_SUPABASE_ANON_KEY=你的匿名KEY
+            VITE_SUPABASE_URL=https://你的项目URL{`\n`}VITE_SUPABASE_ANON_KEY=你的匿名KEY
           </pre>
-          <p className="mt-3 text-sm text-slate-600">并执行 `npm run dev`。</p>
+          <p className="mt-3 text-sm text-slate-600">修改后重新部署即可生效。</p>
         </section>
         {renderNotice()}
       </main>
