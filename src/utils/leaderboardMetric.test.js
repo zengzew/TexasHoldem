@@ -5,18 +5,9 @@ describe('leaderboard metric formatting', () => {
   const baseRow = {
     totalProfit: 7700,
     avgProfitPerSession: 3850,
-    roi: 465,
     amountRmb: 242,
-    winRate: 50,
     avgAmountPerSession: 121,
   };
-
-  it('formats roi rows as percentages', () => {
-    expect(getLeaderboardMetric(baseRow, 'roi')).toEqual({
-      text: '+465.0%',
-      isPositive: true,
-    });
-  });
 
   it('formats amount rows as RMB', () => {
     expect(getLeaderboardMetric(baseRow, 'amount')).toEqual({
@@ -39,10 +30,10 @@ describe('leaderboard metric formatting', () => {
     });
   });
 
-  it('keeps negative roi on one line with explicit sign', () => {
-    expect(getLeaderboardMetric({ ...baseRow, roi: -33.6 }, 'roi')).toEqual({
-      text: '-33.6%',
-      isPositive: false,
+  it('falls back to profit for unsupported metrics', () => {
+    expect(getLeaderboardMetric(baseRow, 'roi')).toEqual({
+      text: '7700',
+      isPositive: true,
     });
   });
 });

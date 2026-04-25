@@ -3754,13 +3754,6 @@ export default function App() {
                         {toRmb(p.amountRmb)}
                       </p>
                     </div>
-                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
-                      <p>ROI</p>
-                      <p className={`mt-0.5 font-semibold ${p.roi >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {p.roi > 0 ? '+' : ''}
-                        {p.roi.toFixed(1)}%
-                      </p>
-                    </div>
                   </div>
                 )}
               </article>
