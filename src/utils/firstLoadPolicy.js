@@ -36,6 +36,7 @@ export function deriveInvalidationPlan(action) {
         room: true,
         openRooms: true,
         leaderboard: false,
+        personalDashboard: false,
         history: false,
       };
     case 'settle-room':
@@ -43,6 +44,7 @@ export function deriveInvalidationPlan(action) {
         room: true,
         openRooms: true,
         leaderboard: true,
+        personalDashboard: true,
         history: true,
       };
     default:
@@ -50,6 +52,7 @@ export function deriveInvalidationPlan(action) {
         room: false,
         openRooms: false,
         leaderboard: false,
+        personalDashboard: false,
         history: false,
       };
   }
@@ -69,6 +72,13 @@ export function shouldRefreshLeaderboardViews({ previousSignature, nextSignature
 export function shouldRefreshHistoryViews({ previousSignature, nextSignature }) {
   return (
     Number(previousSignature?.totalCount || 0) !== Number(nextSignature?.totalCount || 0) ||
+    Number(previousSignature?.settledCount || 0) !== Number(nextSignature?.settledCount || 0) ||
+    String(previousSignature?.latestMarker || '') !== String(nextSignature?.latestMarker || '')
+  );
+}
+
+export function shouldRefreshPersonalDashboardViews({ previousSignature, nextSignature }) {
+  return (
     Number(previousSignature?.settledCount || 0) !== Number(nextSignature?.settledCount || 0) ||
     String(previousSignature?.latestMarker || '') !== String(nextSignature?.latestMarker || '')
   );

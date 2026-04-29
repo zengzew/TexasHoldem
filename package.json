@@ -1,6 +1,6 @@
 {
   "name": "texas-holdem",
-  "version": "2.1.7",
+  "version": "2.2.0",
   "description": "Texas Hold'em",
   "private": true,
   "scripts": {

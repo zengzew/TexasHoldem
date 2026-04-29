@@ -3,6 +3,7 @@ import {
   deriveInitialLoadPlan,
   deriveInvalidationPlan,
   shouldLoadRoomPlayerDetails,
+  shouldRefreshPersonalDashboardViews,
   shouldRefreshHistoryViews,
   shouldRefreshLeaderboardViews,
   shouldRefreshSettledViews,
@@ -114,6 +115,7 @@ describe('firstLoadPolicy', () => {
       room: true,
       openRooms: true,
       leaderboard: false,
+      personalDashboard: false,
       history: false,
     });
 
@@ -121,6 +123,7 @@ describe('firstLoadPolicy', () => {
       room: true,
       openRooms: true,
       leaderboard: true,
+      personalDashboard: true,
       history: true,
     });
   });
@@ -173,6 +176,29 @@ describe('firstLoadPolicy', () => {
       shouldRefreshHistoryViews({
         previousSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
         nextSignature: { totalCount: 5, settledCount: 4, latestMarker: '2026-03-17T09:00:00.000Z' },
+      })
+    ).toBe(true);
+  });
+
+  it('refreshes personal dashboard only when the personal signature changes', () => {
+    expect(
+      shouldRefreshPersonalDashboardViews({
+        previousSignature: { settledCount: 3, latestMarker: '2026-03-17T08:00:00.000Z' },
+        nextSignature: { settledCount: 3, latestMarker: '2026-03-17T08:00:00.000Z' },
+      })
+    ).toBe(false);
+
+    expect(
+      shouldRefreshPersonalDashboardViews({
+        previousSignature: { settledCount: 3, latestMarker: '2026-03-17T08:00:00.000Z' },
+        nextSignature: { settledCount: 4, latestMarker: '2026-03-17T08:00:00.000Z' },
+      })
+    ).toBe(true);
+
+    expect(
+      shouldRefreshPersonalDashboardViews({
+        previousSignature: { settledCount: 3, latestMarker: '2026-03-17T08:00:00.000Z' },
+        nextSignature: { settledCount: 3, latestMarker: '2026-03-17T09:00:00.000Z' },
       })
     ).toBe(true);
   });

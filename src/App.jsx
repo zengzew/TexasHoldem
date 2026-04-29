@@ -6,6 +6,7 @@ import { aggregateLeaderboardRows, buildDateRange, filterRowsByDateRange, sortLe
 import { buildBuyInEventPayload, buildInitialBuyInEventPayload, normalizeBuyInEvents } from './utils/buyInHistory';
 import { LEADERBOARD_BENCHMARKS } from './utils/leaderboardBenchmarks';
 import { getLeaderboardMetric } from './utils/leaderboardMetric';
+import { aggregatePersonalDashboard, buildPersonalDashboardFreshness, buildPersonalTrend } from './utils/personalDashboard';
 import { getAuthModePrimaryLabel, getAuthModeSecondaryLabel, shouldShowForgotPasswordLink } from './utils/authMode';
 import {
   deriveInitialLoadPlan,
@@ -13,6 +14,7 @@ import {
   shouldLoadRoomPlayerDetails,
   shouldRefreshHistoryViews,
   shouldRefreshLeaderboardViews,
+  shouldRefreshPersonalDashboardViews,
   shouldRefreshSettledViews,
   shouldLoadPlayerDirectory,
   shouldLoadTabData,
@@ -21,10 +23,13 @@ import { clearPersistedJoinedRoom, loadPersistedJoinedRoom, savePersistedJoinedR
 import {
   clearHistoryCache,
   clearLeaderboardCache,
+  clearPersonalDashboardCache,
   loadHistoryCache,
   loadLeaderboardCache,
+  loadPersonalDashboardCache,
   saveHistoryCache,
   saveLeaderboardCache,
+  savePersonalDashboardCache,
 } from './utils/tabCache';
 import { buildForgotPasswordResult } from './utils/forgotPassword';
 import { buildLeftMatchSuggestions, findBestProfileForAdd } from './utils/playerSearch';
@@ -253,6 +258,9 @@ export default function App() {
   const [showAllLeaderboard, setShowAllLeaderboard] = useState(false);
   const [leaderboardLoaded, setLeaderboardLoaded] = useState(false);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [personalDashboardRows, setPersonalDashboardRows] = useState([]);
+  const [personalDashboardLoaded, setPersonalDashboardLoaded] = useState(false);
+  const [personalDashboardLoading, setPersonalDashboardLoading] = useState(false);
   const [historySessions, setHistorySessions] = useState([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState('');
   const [historyPage, setHistoryPage] = useState(1);
@@ -289,13 +297,16 @@ export default function App() {
 
   const roomChannelRef = useRef(null);
   const leaderboardLoadPromiseRef = useRef(null);
+  const personalDashboardLoadPromiseRef = useRef(null);
   const historyLoadPromiseRef = useRef(null);
   const profileDirectoryLoadPromiseRef = useRef(null);
   const activeTabRef = useRef(activeTab);
   const leaderboardLoadedRef = useRef(false);
+  const personalDashboardLoadedRef = useRef(false);
   const historyLoadedRef = useRef(false);
   const roomStatusRef = useRef(roomStatus);
   const leaderboardFreshnessRef = useRef({ settledCount: 0 });
+  const personalDashboardFreshnessRef = useRef({ settledCount: 0, latestMarker: '' });
   const historyFreshnessRef = useRef({ totalCount: 0, settledCount: 0 });
   const settleInFlightRef = useRef(false);
   const confirmInFlightPlayerIdsRef = useRef(new Set());
@@ -311,7 +322,7 @@ export default function App() {
   const HISTORY_PAGE_SIZE = 5;
   const LEADERBOARD_COLLAPSED_COUNT = leaderboardCollapsedCount;
   const DEFAULT_RMB_PER_2000 = 100;
-  const TAB_ORDER = { room: 0, leaderboard: 1, history: 2 };
+  const TAB_ORDER = { room: 0, personal: 1, leaderboard: 2, history: 3 };
   const DATE_PRESETS = [
     { key: '3m', label: '近3月' },
     { key: '6m', label: '近半年' },
@@ -593,6 +604,40 @@ export default function App() {
     () => (showAllLeaderboard ? rankedLeaderboard : rankedLeaderboard.slice(0, LEADERBOARD_COLLAPSED_COUNT)),
     [rankedLeaderboard, showAllLeaderboard, LEADERBOARD_COLLAPSED_COUNT]
   );
+  const filteredPersonalDashboardRows = useMemo(
+    () => filterRowsByDateRange(personalDashboardRows, selectedDateRange),
+    [personalDashboardRows, selectedDateRange]
+  );
+  const effectivePersonalDashboardRows = useMemo(() => {
+    const isDefaultWindow =
+      datePreset === 'all' &&
+      customStartDate === defaultStartDate &&
+      customEndDate === defaultEndDate;
+    if (isDefaultWindow && filteredPersonalDashboardRows.length === 0 && personalDashboardRows.length > 0) {
+      return personalDashboardRows;
+    }
+    return filteredPersonalDashboardRows;
+  }, [
+    datePreset,
+    customStartDate,
+    customEndDate,
+    defaultStartDate,
+    defaultEndDate,
+    filteredPersonalDashboardRows,
+    personalDashboardRows,
+  ]);
+  const personalDashboardSummary = useMemo(
+    () => aggregatePersonalDashboard(effectivePersonalDashboardRows),
+    [effectivePersonalDashboardRows]
+  );
+  const personalDashboardTrend = useMemo(
+    () => buildPersonalTrend(effectivePersonalDashboardRows, 10),
+    [effectivePersonalDashboardRows]
+  );
+  const personalTrendMaxAbs = useMemo(
+    () => Math.max(1, ...personalDashboardTrend.map((row) => Math.abs(Number(row.netResult || 0)))),
+    [personalDashboardTrend]
+  );
   const filteredHistorySessions = useMemo(
     () => historySessions,
     [historySessions]
@@ -621,6 +666,7 @@ export default function App() {
   const visiblePlayers = showMineOnly ? sortedPlayers.filter((p) => p.player_id === user.id) : sortedPlayers;
   activeTabRef.current = activeTab;
   leaderboardLoadedRef.current = leaderboardLoaded;
+  personalDashboardLoadedRef.current = personalDashboardLoaded;
   historyLoadedRef.current = historyLoaded;
   roomStatusRef.current = roomStatus;
 
@@ -675,6 +721,17 @@ export default function App() {
       leaderboardFreshnessRef.current = { settledCount: 0 };
       setLeaderboardRows([]);
       setLeaderboardLoaded(false);
+    }
+
+    const personalCache = loadPersonalDashboardCache(userId);
+    if (personalCache && Array.isArray(personalCache.rows)) {
+      personalDashboardFreshnessRef.current = personalCache.freshness || { settledCount: 0, latestMarker: '' };
+      setPersonalDashboardRows(personalCache.rows);
+      setPersonalDashboardLoaded(true);
+    } else {
+      personalDashboardFreshnessRef.current = { settledCount: 0, latestMarker: '' };
+      setPersonalDashboardRows([]);
+      setPersonalDashboardLoaded(false);
     }
 
     const historyCache = loadHistoryCache(userId);
@@ -883,6 +940,9 @@ export default function App() {
     if (options.leaderboard) {
       setLeaderboardLoaded(false);
     }
+    if (options.personalDashboard) {
+      setPersonalDashboardLoaded(false);
+    }
     if (options.history) {
       setHistoryLoaded(false);
     }
@@ -892,7 +952,7 @@ export default function App() {
   }
 
   async function loadDatasetFreshness(options = {}) {
-    const { leaderboard = false, history = false } = options;
+    const { leaderboard = false, personalDashboard = false, history = false } = options;
     const result = {};
     const tasks = [];
 
@@ -932,6 +992,36 @@ export default function App() {
             }, ''),
           };
         })
+      );
+    }
+
+    if (personalDashboard && user?.id) {
+      tasks.push(
+        supabase
+          .from('session_players')
+          .select('session_id')
+          .eq('player_id', user.id)
+          .limit(5000)
+          .then(async ({ data, error }) => {
+            if (error) throw error;
+            const sessionIds = [...new Set((data || []).map((row) => row.session_id).filter(Boolean))];
+            if (!sessionIds.length) {
+              result.personalDashboard = { settledCount: 0, latestMarker: '' };
+              return;
+            }
+            const { data: sessions, error: sessionsError } = await supabase
+              .from('sessions')
+              .select('id,created_at,status')
+              .in('id', sessionIds)
+              .eq('status', 'settled');
+            if (sessionsError) throw sessionsError;
+            result.personalDashboard = buildPersonalDashboardFreshness(
+              (sessions || []).map((session) => ({
+                sessionId: session.id,
+                createdAt: session.created_at,
+              }))
+            );
+          })
       );
     }
 
@@ -1019,6 +1109,81 @@ export default function App() {
     } finally {
       leaderboardLoadPromiseRef.current = null;
       setLeaderboardLoading(false);
+    }
+  }
+
+  async function loadPersonalDashboard(options = {}) {
+    const { force = false } = options;
+    if (!user?.id) return [];
+    if (!force && personalDashboardLoaded) return personalDashboardRows;
+    if (personalDashboardLoadPromiseRef.current) return personalDashboardLoadPromiseRef.current;
+
+    setPersonalDashboardLoading(true);
+    const request = (async () => {
+      const { data: rows, error: rowsErr } = await supabase
+        .from('session_players')
+        .select('session_id,player_id,buy_in,net_result')
+        .eq('player_id', user.id)
+        .limit(5000);
+      if (rowsErr) throw rowsErr;
+
+      const sessionIds = [...new Set((rows || []).map((row) => row.session_id).filter(Boolean))];
+      if (!sessionIds.length || !(rows || []).length) {
+        const emptyPayload = { rows: [], freshness: { settledCount: 0, latestMarker: '' } };
+        personalDashboardFreshnessRef.current = emptyPayload.freshness;
+        savePersonalDashboardCache(user.id, emptyPayload);
+        setPersonalDashboardRows([]);
+        setPersonalDashboardLoaded(true);
+        return [];
+      }
+
+      const { data: sessions, error: sessionsErr } = await supabase
+        .from('sessions')
+        .select('id,created_at,status,rmb_per_2000')
+        .in('id', sessionIds)
+        .eq('status', 'settled');
+      if (sessionsErr) throw sessionsErr;
+
+      const sessionMeta = new Map(
+        (sessions || []).map((row) => [
+          row.id,
+          {
+            createdAt: row.created_at,
+            rmbPer2000: Number(row.rmb_per_2000 || DEFAULT_RMB_PER_2000),
+          },
+        ])
+      );
+
+      const mapped = (rows || [])
+        .filter((row) => sessionMeta.has(row.session_id))
+        .map((row) => {
+          const meta = sessionMeta.get(row.session_id);
+          const netResult = toChipInt(row.net_result);
+          return {
+            sessionId: row.session_id,
+            playerId: row.player_id,
+            buyIn: toNonNegativeChipInt(row.buy_in),
+            netResult,
+            amountRmb: chipsToRmb(netResult, meta.rmbPer2000),
+            createdAt: meta.createdAt || null,
+            rmbPer2000: Number(meta.rmbPer2000 || DEFAULT_RMB_PER_2000),
+          };
+        });
+
+      const nextFreshness = buildPersonalDashboardFreshness(mapped);
+      personalDashboardFreshnessRef.current = nextFreshness;
+      savePersonalDashboardCache(user.id, { rows: mapped, freshness: nextFreshness });
+      setPersonalDashboardRows(mapped);
+      setPersonalDashboardLoaded(true);
+      return mapped;
+    })();
+
+    personalDashboardLoadPromiseRef.current = request;
+    try {
+      return await request;
+    } finally {
+      personalDashboardLoadPromiseRef.current = null;
+      setPersonalDashboardLoading(false);
     }
   }
 
@@ -1353,17 +1518,20 @@ export default function App() {
   }
 
   async function refreshLazyDatasets(options = {}) {
-    const { leaderboard = false, history = false, guardByFreshness = false } = options;
+    const { leaderboard = false, personalDashboard = false, history = false, guardByFreshness = false } = options;
     const tasks = [];
     const currentTab = activeTabRef.current;
     let freshness = null;
 
     const shouldConsiderLeaderboard = leaderboard && (currentTab === 'leaderboard' || leaderboardLoadedRef.current);
+    const shouldConsiderPersonalDashboard =
+      personalDashboard && (currentTab === 'personal' || personalDashboardLoadedRef.current);
     const shouldConsiderHistory = history && (currentTab === 'history' || historyLoadedRef.current);
 
-    if (guardByFreshness && (shouldConsiderLeaderboard || shouldConsiderHistory)) {
+    if (guardByFreshness && (shouldConsiderLeaderboard || shouldConsiderPersonalDashboard || shouldConsiderHistory)) {
       freshness = await loadDatasetFreshness({
         leaderboard: shouldConsiderLeaderboard,
+        personalDashboard: shouldConsiderPersonalDashboard,
         history: shouldConsiderHistory,
       });
     }
@@ -1381,6 +1549,22 @@ export default function App() {
       }
       if (canRefresh && shouldConsiderLeaderboard) {
         tasks.push(loadLeaderboard({ force: true }));
+      }
+    }
+
+    if (personalDashboard) {
+      const canRefresh =
+        !guardByFreshness ||
+        !shouldConsiderPersonalDashboard ||
+        shouldRefreshPersonalDashboardViews({
+          previousSignature: personalDashboardFreshnessRef.current,
+          nextSignature: freshness?.personalDashboard,
+        });
+      if (canRefresh) {
+        invalidateLazyData({ personalDashboard: true });
+      }
+      if (canRefresh && shouldConsiderPersonalDashboard) {
+        tasks.push(loadPersonalDashboard({ force: true }));
       }
     }
 
@@ -1417,8 +1601,9 @@ export default function App() {
     }
     await refreshLazyDatasets({
       leaderboard: nextPlan.leaderboard,
+      personalDashboard: nextPlan.personalDashboard,
       history: nextPlan.history,
-      guardByFreshness: nextPlan.leaderboard || nextPlan.history,
+      guardByFreshness: nextPlan.leaderboard || nextPlan.personalDashboard || nextPlan.history,
     });
   }
 
@@ -1597,7 +1782,12 @@ export default function App() {
               nextSettledCount: nextStatus === 'settled' ? 1 : 0,
             })
           ) {
-            await refreshLazyDatasets({ leaderboard: true, history: true, guardByFreshness: true });
+            await refreshLazyDatasets({
+              leaderboard: true,
+              personalDashboard: true,
+              history: true,
+              guardByFreshness: true,
+            });
           }
         }
       )
@@ -2542,6 +2732,7 @@ export default function App() {
     if (user?.id) {
       clearPersistedJoinedRoom(user.id);
       clearLeaderboardCache(user.id);
+      clearPersonalDashboardCache(user.id);
       clearHistoryCache(user.id);
     }
     if (roomChannelRef.current) {
@@ -2564,6 +2755,10 @@ export default function App() {
     setLeaderboardLoaded(false);
     setLeaderboardLoading(false);
     leaderboardFreshnessRef.current = { settledCount: 0 };
+    setPersonalDashboardRows([]);
+    setPersonalDashboardLoaded(false);
+    setPersonalDashboardLoading(false);
+    personalDashboardFreshnessRef.current = { settledCount: 0, latestMarker: '' };
     setHistorySessions([]);
     setHistoryLoaded(false);
     setHistoryLoading(false);
@@ -2687,7 +2882,7 @@ export default function App() {
       if (!hasSupabaseConfig || !user) return;
       try {
         await ensureProfile(user);
-        invalidateLazyData({ leaderboard: true, history: true, profileDirectory: true });
+        invalidateLazyData({ leaderboard: true, personalDashboard: true, history: true, profileDirectory: true });
         setProfileDirectory([]);
         setAddPlayerRemoteSuggestions([]);
         hydrateCachedTabData(user.id);
@@ -2737,6 +2932,21 @@ export default function App() {
       document.removeEventListener('touchstart', handlePointerDown);
     };
   }, [openBuyInHistoryKey]);
+
+  useEffect(() => {
+    if (!hasSupabaseConfig || !user) return;
+    if (
+      !shouldLoadTabData({
+        activeTab,
+        targetTab: 'personal',
+        loaded: personalDashboardLoaded,
+        loading: personalDashboardLoading,
+      })
+    ) {
+      return;
+    }
+    loadPersonalDashboard().catch((err) => showNotice(err.message, 'error'));
+  }, [activeTab, user, personalDashboardLoaded, personalDashboardLoading]);
 
   useEffect(() => {
     if (!hasSupabaseConfig || !user) return;
@@ -2831,7 +3041,7 @@ export default function App() {
   }, [historyPage, historyPageCount]);
 
   useEffect(() => {
-    if (activeTab !== 'leaderboard') {
+    if (activeTab !== 'leaderboard' && activeTab !== 'personal') {
       setDatePopoverOpen(false);
     }
   }, [activeTab]);
@@ -2990,9 +3200,9 @@ export default function App() {
         </div>
 
         <div className="tab-scroll segmented-shell relative mt-3 overflow-x-auto p-1">
-          <div className="relative z-[1] grid min-w-full grid-cols-3 gap-2">
+          <div className="relative z-[1] grid min-w-full grid-cols-4 gap-1.5 sm:gap-2">
             <button
-              className={`relative rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
+              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'room'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3007,7 +3217,22 @@ export default function App() {
               当前房间
             </button>
             <button
-              className={`relative rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
+              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+                activeTab === 'personal'
+                  ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
+                  : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
+              }`}
+              style={
+                activeTab === 'personal'
+                  ? { background: 'linear-gradient(138deg, #4f46e5, #3b82f6 56%, #22d3ee)' }
+                  : undefined
+              }
+              onClick={() => handleTabChange('personal')}
+            >
+              个人看板
+            </button>
+            <button
+              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'leaderboard'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3022,7 +3247,7 @@ export default function App() {
               积分榜
             </button>
             <button
-              className={`relative rounded-2xl px-2 py-2.5 text-sm font-semibold transition focus:outline-none ${
+              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'history'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3636,6 +3861,108 @@ export default function App() {
       </section>
       )}
 
+      {activeTab === 'personal' && (
+      <section className={`${tabSlideClass} glass-card panel-fill mt-3 flex flex-col rounded-3xl p-4 sm:mt-4 sm:p-6`}>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2.5">
+          <h2 className="text-xl font-semibold leading-none text-ink sm:text-2xl">个人看板</h2>
+          <div className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-sm shadow-sm backdrop-blur-md whitespace-nowrap">
+            <span className="text-slate-500">个人总局数</span>
+            <span className="font-semibold text-slate-900">{personalDashboardSummary.totalSessions}</span>
+          </div>
+        </div>
+        <div className="mt-2 w-full">{renderDatePopover()}</div>
+
+        {!effectivePersonalDashboardRows.length && (
+          <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-4 py-3 text-sm text-slate-500 shadow-sm backdrop-blur-md">
+            {personalDashboardLoading && !personalDashboardLoaded ? '个人看板加载中...' : '当前用户暂无已结算个人对局数据'}
+          </div>
+        )}
+
+        {effectivePersonalDashboardRows.length > 0 && (
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                { label: '总局数', value: personalDashboardSummary.totalSessions },
+                { label: '盈利场次', value: personalDashboardSummary.winningGames },
+                { label: '总买入', value: `${toChips(personalDashboardSummary.totalBuyIn)} 积分` },
+                {
+                  label: '净盈利',
+                  value: `${toChips(personalDashboardSummary.totalProfit)} 积分`,
+                  tone: personalDashboardSummary.totalProfit >= 0 ? 'text-emerald-600' : 'text-rose-600',
+                },
+                {
+                  label: '净盈利金额',
+                  value: toRmb(personalDashboardSummary.totalAmountRmb),
+                  tone: personalDashboardSummary.totalAmountRmb >= 0 ? 'text-emerald-600' : 'text-rose-600',
+                },
+                {
+                  label: '场均盈利',
+                  value: `${toChips(personalDashboardSummary.avgProfitPerSession)} 积分`,
+                  tone: personalDashboardSummary.avgProfitPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600',
+                },
+                {
+                  label: '场均金额',
+                  value: toRmb(personalDashboardSummary.avgAmountPerSession),
+                  tone: personalDashboardSummary.avgAmountPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600',
+                },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-white/80 bg-white/80 px-3 py-3 shadow-sm backdrop-blur-md">
+                  <p className="text-xs font-semibold text-slate-500">{item.label}</p>
+                  <p className={`mt-1 whitespace-nowrap text-base font-semibold tabular-nums ${item.tone || 'text-slate-900'}`}>
+                    {item.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur-md">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold text-slate-900">近 10 局盈亏趋势</h3>
+                <span className="text-xs text-slate-500">按时间升序</span>
+              </div>
+              <div className="relative mt-4 h-40 rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
+                <div className="absolute left-3 right-3 top-1/2 border-t border-slate-200" aria-hidden />
+                <div className="relative grid h-full grid-flow-col auto-cols-fr gap-2">
+                  {personalDashboardTrend.map((row) => {
+                    const net = Number(row.netResult || 0);
+                    const height = Math.max(6, Math.min(48, (Math.abs(net) / personalTrendMaxAbs) * 46));
+                    const positive = net >= 0;
+                    const tooltip = `房间 ${row.sessionId}\n${formatDateTime(row.createdAt)}\n${toChips(net)} 积分 · ${toRmb(row.amountRmb)}`;
+                    return (
+                      <button
+                        key={`${row.sessionId}-${row.ordinal}`}
+                        type="button"
+                        title={tooltip}
+                        aria-label={tooltip}
+                        className="group relative h-full min-w-[1.25rem] focus:outline-none"
+                      >
+                        <span
+                          className={`absolute left-1/2 w-4 -translate-x-1/2 rounded-full transition ${
+                            positive ? 'bg-emerald-400/85' : 'bg-rose-400/85'
+                          }`}
+                          style={positive ? { bottom: '50%', height: `${height}%` } : { top: '50%', height: `${height}%` }}
+                        />
+                        <span className="absolute -top-11 left-1/2 z-10 hidden w-40 -translate-x-1/2 rounded-xl border border-white/80 bg-white/95 px-3 py-2 text-left text-[11px] font-medium text-slate-700 shadow-lg backdrop-blur-md group-hover:block group-focus:block">
+                          <span className="block truncate">房间 {row.sessionId}</span>
+                          <span className="block truncate">{formatDateTime(row.createdAt)}</span>
+                          <span className={`block ${net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {toChips(net)} 积分 · {toRmb(row.amountRmb)}
+                          </span>
+                        </span>
+                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 text-[10px] text-slate-400">
+                          {row.ordinal}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+      )}
+
       {activeTab === 'leaderboard' && (
       <section className={`${tabSlideClass} glass-card panel-fill mt-3 flex flex-col rounded-3xl p-4 sm:mt-4 sm:p-6`}>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2.5">
@@ -3842,7 +4169,6 @@ export default function App() {
                           </div>
                         )}
                         {session.players.map((player) => {
-                          const roi = player.buyIn ? (player.netResult / player.buyIn) * 100 : 0;
                           const isProfit = player.netResult >= 0;
                           return (
                             <div
@@ -3860,13 +4186,6 @@ export default function App() {
                                   </span>
                                   <span className={`ml-1 font-semibold ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
                                     ({toRmb(chipsToRmb(player.netResult, session.rmbPer2000))})
-                                  </span>
-                                </p>
-                                <p>
-                                  ROI{' '}
-                                  <span className={`font-semibold ${roi >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                    {roi > 0 ? '+' : ''}
-                                    {roi.toFixed(1)}%
                                   </span>
                                 </p>
                               </div>

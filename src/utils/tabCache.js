@@ -63,3 +63,15 @@ export function saveHistoryCache(userId, payload, storageArg) {
 export function clearHistoryCache(userId, storageArg) {
   clearKey(getTabCacheKey(userId, 'history'), safeSessionStorage(storageArg));
 }
+
+export function loadPersonalDashboardCache(userId, storageArg) {
+  return loadJson(getTabCacheKey(userId, 'personal-dashboard'), safeSessionStorage(storageArg));
+}
+
+export function savePersonalDashboardCache(userId, payload, storageArg) {
+  saveJson(getTabCacheKey(userId, 'personal-dashboard'), payload, safeSessionStorage(storageArg));
+}
+
+export function clearPersonalDashboardCache(userId, storageArg) {
+  clearKey(getTabCacheKey(userId, 'personal-dashboard'), safeSessionStorage(storageArg));
+}

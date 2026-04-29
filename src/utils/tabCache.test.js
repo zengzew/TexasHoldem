@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   clearHistoryCache,
   clearLeaderboardCache,
+  clearPersonalDashboardCache,
   loadHistoryCache,
   loadLeaderboardCache,
+  loadPersonalDashboardCache,
   saveHistoryCache,
   saveLeaderboardCache,
+  savePersonalDashboardCache,
 } from './tabCache';
 
 function createMockStorage() {
@@ -46,5 +49,17 @@ describe('tab cache persistence', () => {
 
     clearHistoryCache('u1', storage);
     expect(loadHistoryCache('u1', storage)).toBeNull();
+  });
+
+  it('saves and loads personal dashboard cache by user id', () => {
+    const storage = createMockStorage();
+    const payload = { rows: [{ sessionId: '20260318' }], freshness: { settledCount: 1, latestMarker: '2026-03-18T12:00:00.000Z' } };
+
+    savePersonalDashboardCache('u1', payload, storage);
+
+    expect(loadPersonalDashboardCache('u1', storage)).toEqual(payload);
+
+    clearPersonalDashboardCache('u1', storage);
+    expect(loadPersonalDashboardCache('u1', storage)).toBeNull();
   });
 });
