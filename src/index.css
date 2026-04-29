@@ -273,6 +273,16 @@
     display: none;
   }
 
+  .main-tab-button {
+    flex: 0 0 calc((100% - 0.75rem) / 3.5);
+  }
+
+  @media (min-width: 640px) {
+    .main-tab-button {
+      flex: 1 1 0;
+    }
+  }
+
   .segmented-shell {
     @apply rounded-[1.35rem] border border-white/55;
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.3));

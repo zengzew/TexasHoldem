@@ -322,7 +322,7 @@ export default function App() {
   const HISTORY_PAGE_SIZE = 5;
   const LEADERBOARD_COLLAPSED_COUNT = leaderboardCollapsedCount;
   const DEFAULT_RMB_PER_2000 = 100;
-  const TAB_ORDER = { room: 0, personal: 1, leaderboard: 2, history: 3 };
+  const TAB_ORDER = { room: 0, leaderboard: 1, history: 2, personal: 3 };
   const DATE_PRESETS = [
     { key: '3m', label: '近3月' },
     { key: '6m', label: '近半年' },
@@ -3200,9 +3200,9 @@ export default function App() {
         </div>
 
         <div className="tab-scroll segmented-shell relative mt-3 overflow-x-auto p-1">
-          <div className="relative z-[1] grid min-w-full grid-cols-4 gap-1.5 sm:gap-2">
+          <div className="relative z-[1] flex min-w-full flex-nowrap gap-1.5 sm:gap-2">
             <button
-              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'room'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3217,22 +3217,7 @@ export default function App() {
               当前房间
             </button>
             <button
-              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
-                activeTab === 'personal'
-                  ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
-                  : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
-              }`}
-              style={
-                activeTab === 'personal'
-                  ? { background: 'linear-gradient(138deg, #4f46e5, #3b82f6 56%, #22d3ee)' }
-                  : undefined
-              }
-              onClick={() => handleTabChange('personal')}
-            >
-              个人看板
-            </button>
-            <button
-              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'leaderboard'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3247,7 +3232,7 @@ export default function App() {
               积分榜
             </button>
             <button
-              className={`relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'history'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3260,6 +3245,21 @@ export default function App() {
               onClick={() => handleTabChange('history')}
             >
               历史记录
+            </button>
+            <button
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+                activeTab === 'personal'
+                  ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
+                  : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
+              }`}
+              style={
+                activeTab === 'personal'
+                  ? { background: 'linear-gradient(138deg, #4f46e5, #3b82f6 56%, #22d3ee)' }
+                  : undefined
+              }
+              onClick={() => handleTabChange('personal')}
+            >
+              个人看板
             </button>
           </div>
         </div>
@@ -3918,7 +3918,6 @@ export default function App() {
             <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur-md">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-base font-semibold text-slate-900">近 10 局盈亏趋势</h3>
-                <span className="text-xs text-slate-500">按时间升序</span>
               </div>
               <div className="relative mt-4 h-40 rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
                 <div className="absolute left-3 right-3 top-1/2 border-t border-slate-200" aria-hidden />
