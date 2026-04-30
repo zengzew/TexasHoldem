@@ -4050,7 +4050,9 @@ export default function App() {
                     </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">
                       <p>盈利场次</p>
-                      <p className="mt-0.5 font-semibold text-slate-900">{p.winningGames}</p>
+                      <p className="mt-0.5 font-semibold text-slate-900">
+                        盈利 {p.winningGames}/{p.totalSessions} 局
+                      </p>
                     </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">
                       <p>总买入</p>
@@ -4079,6 +4081,26 @@ export default function App() {
                       <p className={`mt-0.5 font-semibold ${p.amountRmb >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                         {toRmb(p.amountRmb)}
                       </p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                      <p>最大单局盈利</p>
+                      <p className={`mt-0.5 font-semibold ${p.maxSingleProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {toChips(p.maxSingleProfit)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                      <p>最大单局亏损</p>
+                      <p className="mt-0.5 font-semibold text-rose-600">
+                        {toChips(Math.max(0, -Number(p.maxSingleLoss || 0)))}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                      <p>波动率</p>
+                      <p className="mt-0.5 font-semibold text-slate-900">{toChips(p.profitVolatility)}</p>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
+                      <p>最大回撤</p>
+                      <p className="mt-0.5 font-semibold text-rose-600">{toChips(p.maxDrawdown)}</p>
                     </div>
                   </div>
                 )}

@@ -25,32 +25,46 @@ describe('analytics utils', () => {
     expect(filterRowsByDateRange(rows, range).map((r) => r.id)).toEqual(['b']);
   });
 
-  it('aggregates total games, winning games, win rate and RMB amount', () => {
+  it('aggregates leaderboard risk metrics from time-ordered session results', () => {
     const rows = [
-      { playerId: 'u1', playerName: 'A', buyIn: 2000, netResult: 1000, rmbPer2000: 100 },
-      { playerId: 'u1', playerName: 'A', buyIn: 3000, netResult: -500, rmbPer2000: 120 },
+      { playerId: 'u1', playerName: 'A', buyIn: 2000, netResult: -1000, rmbPer2000: 100, createdAt: '2026-01-02T00:00:00.000Z' },
+      { playerId: 'u1', playerName: 'A', buyIn: 2000, netResult: 2000, rmbPer2000: 100, createdAt: '2026-01-01T00:00:00.000Z' },
+      { playerId: 'u1', playerName: 'A', buyIn: 3000, netResult: -500, rmbPer2000: 120, createdAt: '2026-01-03T00:00:00.000Z' },
       { playerId: 'u2', playerName: 'B', buyIn: 2000, netResult: 0, rmbPer2000: 100 },
     ];
 
     const aggregated = aggregateLeaderboardRows(rows);
     const a = aggregated.find((row) => row.playerId === 'u1');
 
-    expect(a?.totalSessions).toBe(2);
+    expect(a?.totalSessions).toBe(3);
     expect(a?.winningGames).toBe(1);
-    expect(a?.winRate).toBe(50);
     expect(a?.totalProfit).toBe(500);
     expect(a?.amountRmb).toBe(20);
+    expect(a?.maxSingleProfit).toBe(2000);
+    expect(a?.maxSingleLoss).toBe(-1000);
+    expect(a?.profitVolatility).toBe(1312);
+    expect(a?.maxDrawdown).toBe(1500);
   });
 
-  it('supports sort metric avgProfit, amount, avgAmount and winRate in analytics utilities', () => {
+  it('sets volatility and drawdown to zero for single-session samples', () => {
+    const [row] = aggregateLeaderboardRows([
+      { playerId: 'u1', playerName: 'A', buyIn: 2000, netResult: 1000, rmbPer2000: 100 },
+    ]);
+
+    expect(row.profitVolatility).toBe(0);
+    expect(row.maxDrawdown).toBe(0);
+    expect(row.maxSingleProfit).toBe(1000);
+    expect(row.maxSingleLoss).toBe(1000);
+  });
+
+  it('supports sort metric avgProfit, amount, avgAmount and winningGames in analytics utilities', () => {
     const rows = [
       {
         playerId: 'a',
         totalProfit: 100,
         totalSessions: 2,
-        winRate: 40,
+        winningGames: 1,
         amountRmb: 50,
-        roi: 10,
         avgProfitPerSession: 50,
         avgAmountPerSession: 25,
       },
@@ -58,9 +72,8 @@ describe('analytics utils', () => {
         playerId: 'b',
         totalProfit: 50,
         totalSessions: 3,
-        winRate: 85,
+        winningGames: 2,
         amountRmb: 20,
-        roi: 8,
         avgProfitPerSession: 17,
         avgAmountPerSession: 6.7,
       },
@@ -68,9 +81,8 @@ describe('analytics utils', () => {
         playerId: 'c',
         totalProfit: 10,
         totalSessions: 1,
-        winRate: 20,
+        winningGames: 1,
         amountRmb: 99,
-        roi: 2,
         avgProfitPerSession: 10,
         avgAmountPerSession: 99,
       },
@@ -78,7 +90,7 @@ describe('analytics utils', () => {
 
     expect(sortLeaderboardRows(rows, 'avgProfit').map((row) => row.playerId)).toEqual(['a', 'b', 'c']);
     expect(sortLeaderboardRows(rows, 'amount').map((row) => row.playerId)).toEqual(['c', 'a', 'b']);
-    expect(sortLeaderboardRows(rows, 'winRate').map((row) => row.playerId)).toEqual(['b', 'a', 'c']);
+    expect(sortLeaderboardRows(rows, 'winningGames').map((row) => row.playerId)).toEqual(['b', 'a', 'c']);
     expect(sortLeaderboardRows(rows, 'efficiency').map((row) => row.playerId)).toEqual(['c', 'a', 'b']);
   });
 });

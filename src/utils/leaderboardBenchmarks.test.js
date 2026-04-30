@@ -8,6 +8,7 @@ describe('leaderboard benchmarks', () => {
       'avgProfit',
       'amount',
       'efficiency',
+      'winningGames',
     ]);
     expect(LEADERBOARD_BENCHMARKS.some((item) => item.key === 'roi')).toBe(false);
     expect(LEADERBOARD_BENCHMARKS.some((item) => item.key === 'winRate')).toBe(false);

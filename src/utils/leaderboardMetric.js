@@ -23,6 +23,8 @@ export function getLeaderboardMetric(row, metric = 'profit') {
   const avgProfitPerSession = safeNumber(row?.avgProfitPerSession);
   const amountRmb = safeNumber(row?.amountRmb);
   const avgAmountPerSession = safeNumber(row?.avgAmountPerSession);
+  const winningGames = Math.round(safeNumber(row?.winningGames));
+  const totalSessions = Math.round(safeNumber(row?.totalSessions));
 
   switch (metric) {
     case 'avgProfit':
@@ -39,6 +41,11 @@ export function getLeaderboardMetric(row, metric = 'profit') {
       return {
         text: formatRmb(avgAmountPerSession),
         isPositive: avgAmountPerSession >= 0,
+      };
+    case 'winningGames':
+      return {
+        text: `盈利 ${winningGames}/${totalSessions}`,
+        isPositive: winningGames > 0,
       };
     case 'profit':
     default:

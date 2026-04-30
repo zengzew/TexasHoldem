@@ -7,6 +7,8 @@ describe('leaderboard metric formatting', () => {
     avgProfitPerSession: 3850,
     amountRmb: 242,
     avgAmountPerSession: 121,
+    winningGames: 3,
+    totalSessions: 4,
   };
 
   it('formats amount rows as RMB', () => {
@@ -33,6 +35,13 @@ describe('leaderboard metric formatting', () => {
   it('falls back to profit for unsupported metrics', () => {
     expect(getLeaderboardMetric(baseRow, 'roi')).toEqual({
       text: '7700',
+      isPositive: true,
+    });
+  });
+
+  it('formats winning game rows as a count over total sessions', () => {
+    expect(getLeaderboardMetric(baseRow, 'winningGames')).toEqual({
+      text: '盈利 3/4',
       isPositive: true,
     });
   });

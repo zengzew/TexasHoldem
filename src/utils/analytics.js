@@ -5,6 +5,37 @@ function parseNum(value, fallback = 0) {
 
 const BEIJING_OFFSET_HOURS = 8;
 
+function getRowTimestamp(row) {
+  const ts = row?.createdAt || row?.created_at || '';
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
+function calculateVolatility(values) {
+  const list = Array.isArray(values) ? values : [];
+  if (list.length <= 1) return 0;
+  const avg = list.reduce((sum, value) => sum + value, 0) / list.length;
+  const variance = list.reduce((sum, value) => sum + (value - avg) ** 2, 0) / list.length;
+  return Math.round(Math.sqrt(variance));
+}
+
+function calculateMaxDrawdown(values) {
+  const list = Array.isArray(values) ? values : [];
+  if (list.length <= 1) return 0;
+
+  let running = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+
+  list.forEach((value) => {
+    running += value;
+    peak = Math.max(peak, running);
+    maxDrawdown = Math.max(maxDrawdown, peak - running);
+  });
+
+  return Math.round(maxDrawdown);
+}
+
 function beijingTimeToUtc(year, monthIndex, day, hour = 0, minute = 0, second = 0, ms = 0) {
   return new Date(Date.UTC(year, monthIndex, day, hour - BEIJING_OFFSET_HOURS, minute, second, ms));
 }
@@ -83,6 +114,7 @@ export function aggregateLeaderboardRows(rows) {
         totalBuyIn: 0,
         totalProfit: 0,
         amountRmb: 0,
+        results: [],
       });
     }
 
@@ -96,19 +128,34 @@ export function aggregateLeaderboardRows(rows) {
     row.totalBuyIn += buyIn;
     row.totalProfit += netResult;
     row.amountRmb += (netResult / 2000) * rate;
+    row.results.push({
+      netResult,
+      timestamp: getRowTimestamp(item),
+    });
   });
 
   return Array.from(agg.values()).map((row) => {
     const roi = row.totalBuyIn ? (row.totalProfit / row.totalBuyIn) * 100 : 0;
     const winRate = row.totalSessions ? (row.winningGames / row.totalSessions) * 100 : 0;
     const avgAmountPerSession = row.totalSessions ? row.amountRmb / row.totalSessions : 0;
+    const orderedResults = row.results
+      .slice()
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map((item) => item.netResult);
+    const maxSingleProfit = orderedResults.length ? Math.max(...orderedResults) : 0;
+    const maxSingleLoss = orderedResults.length ? Math.min(...orderedResults) : 0;
+
     return {
-      ...row,
+      ...Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'results')),
       totalBuyIn: Math.round(row.totalBuyIn),
       totalProfit: Math.round(row.totalProfit),
       amountRmb: Number(row.amountRmb.toFixed(2)),
       avgProfitPerSession: row.totalSessions ? Math.round(row.totalProfit / row.totalSessions) : 0,
       avgAmountPerSession: Number(avgAmountPerSession.toFixed(2)),
+      maxSingleProfit,
+      maxSingleLoss,
+      profitVolatility: calculateVolatility(orderedResults),
+      maxDrawdown: calculateMaxDrawdown(orderedResults),
       roi: Number(roi.toFixed(1)),
       winRate: Number(winRate.toFixed(1)),
     };
@@ -123,6 +170,7 @@ export function sortLeaderboardRows(rows, metric = 'profit') {
     avgProfit: (a, b) => b.avgProfitPerSession - a.avgProfitPerSession || b.totalProfit - a.totalProfit,
     amount: (a, b) => b.amountRmb - a.amountRmb || b.totalProfit - a.totalProfit,
     efficiency: (a, b) => b.avgAmountPerSession - a.avgAmountPerSession || b.amountRmb - a.amountRmb,
+    winningGames: (a, b) => b.winningGames - a.winningGames || b.totalProfit - a.totalProfit || b.totalSessions - a.totalSessions,
     winRate: (a, b) => b.winRate - a.winRate || b.totalProfit - a.totalProfit,
   };
 
