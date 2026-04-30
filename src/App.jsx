@@ -3920,12 +3920,12 @@ export default function App() {
                 <h3 className="text-base font-semibold text-slate-900">近 10 局盈亏趋势</h3>
               </div>
               <div className="relative mt-4 h-40 rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
-                <div className="absolute left-3 right-3 top-1/2 border-t border-slate-200" aria-hidden />
-                <div className="relative grid h-full grid-flow-col auto-cols-fr gap-2">
+                <div className="absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
+                <div className="relative grid h-full grid-flow-col auto-cols-fr gap-1.5 sm:gap-2">
                   {personalDashboardTrend.map((row) => {
                     const net = Number(row.netResult || 0);
-                    const height = Math.max(6, Math.min(48, (Math.abs(net) / personalTrendMaxAbs) * 46));
-                    const positive = net >= 0;
+                    const isZero = net === 0;
+                    const height = isZero ? 2 : Math.max(10, Math.min(46, (Math.abs(net) / personalTrendMaxAbs) * 44));
                     const tooltip = `房间 ${row.sessionId}\n${formatDateTime(row.createdAt)}\n${toChips(net)} 积分 · ${toRmb(row.amountRmb)}`;
                     return (
                       <button
@@ -3933,13 +3933,38 @@ export default function App() {
                         type="button"
                         title={tooltip}
                         aria-label={tooltip}
-                        className="group relative h-full min-w-[1.25rem] focus:outline-none"
+                        className="group relative h-full min-w-[1.4rem] focus:outline-none"
                       >
                         <span
-                          className={`absolute left-1/2 w-4 -translate-x-1/2 rounded-full transition ${
-                            positive ? 'bg-emerald-400/85' : 'bg-rose-400/85'
+                          className={`absolute left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums ${
+                            net > 0 ? 'text-emerald-600' : net < 0 ? 'text-rose-600' : 'text-slate-500'
                           }`}
-                          style={positive ? { bottom: '50%', height: `${height}%` } : { top: '50%', height: `${height}%` }}
+                          style={
+                            net > 0
+                              ? { bottom: `calc(50% + ${height}% + 0.25rem)` }
+                              : net < 0
+                                ? { top: `calc(50% + ${height}% + 0.25rem)` }
+                                : { top: 'calc(50% + 0.35rem)' }
+                          }
+                        >
+                          {net > 0 ? '+' : ''}
+                          {toChips(net)}
+                        </span>
+                        <span
+                          className={`absolute left-1/2 w-4 -translate-x-1/2 rounded-full transition ${
+                            net > 0
+                              ? 'bg-emerald-400/85 shadow-[0_8px_18px_rgba(16,185,129,0.22)]'
+                              : net < 0
+                                ? 'bg-rose-400/85 shadow-[0_8px_18px_rgba(244,63,94,0.22)]'
+                                : 'bg-slate-300'
+                          }`}
+                          style={
+                            net > 0
+                              ? { bottom: '50%', height: `${height}%` }
+                              : net < 0
+                                ? { top: '50%', height: `${height}%` }
+                                : { top: '50%', height: '0.25rem' }
+                          }
                         />
                         <span className="absolute -top-11 left-1/2 z-10 hidden w-40 -translate-x-1/2 rounded-xl border border-white/80 bg-white/95 px-3 py-2 text-left text-[11px] font-medium text-slate-700 shadow-lg backdrop-blur-md group-hover:block group-focus:block">
                           <span className="block truncate">房间 {row.sessionId}</span>
@@ -3947,9 +3972,6 @@ export default function App() {
                           <span className={`block ${net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                             {toChips(net)} 积分 · {toRmb(row.amountRmb)}
                           </span>
-                        </span>
-                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 text-[10px] text-slate-400">
-                          {row.ordinal}
                         </span>
                       </button>
                     );
