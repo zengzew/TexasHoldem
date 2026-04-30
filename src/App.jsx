@@ -3199,10 +3199,10 @@ export default function App() {
           </div>
         </div>
 
-        <div className="tab-scroll segmented-shell relative mt-3 overflow-x-auto p-1">
+        <div className="segmented-shell relative mt-3 p-1">
           <div className="relative z-[1] flex min-w-full flex-nowrap gap-1.5 sm:gap-2">
             <button
-              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[12px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'room'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3217,7 +3217,7 @@ export default function App() {
               当前房间
             </button>
             <button
-              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[12px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'leaderboard'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3232,7 +3232,7 @@ export default function App() {
               积分榜
             </button>
             <button
-              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[12px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'history'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'
@@ -3247,7 +3247,7 @@ export default function App() {
               历史记录
             </button>
             <button
-              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[13px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
+              className={`main-tab-button relative rounded-2xl px-1 py-2.5 text-[12px] font-semibold transition focus:outline-none sm:px-2 sm:text-sm ${
                 activeTab === 'personal'
                   ? 'text-white shadow-[0_10px_24px_rgba(59,130,246,0.35)]'
                   : 'border border-white/80 bg-white/75 text-slate-700 shadow-sm'

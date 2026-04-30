@@ -274,13 +274,8 @@
   }
 
   .main-tab-button {
-    flex: 0 0 calc((100% - 0.75rem) / 3.5);
-  }
-
-  @media (min-width: 640px) {
-    .main-tab-button {
-      flex: 1 1 0;
-    }
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .segmented-shell {
