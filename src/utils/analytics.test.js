@@ -42,19 +42,19 @@ describe('analytics utils', () => {
     expect(a?.amountRmb).toBe(20);
     expect(a?.maxSingleProfit).toBe(2000);
     expect(a?.maxSingleLoss).toBe(-1000);
-    expect(a?.profitVolatility).toBe(1312);
-    expect(a?.maxDrawdown).toBe(1500);
+    expect(a).not.toHaveProperty('profitVolatility');
+    expect(a).not.toHaveProperty('maxDrawdown');
   });
 
-  it('sets volatility and drawdown to zero for single-session samples', () => {
+  it('keeps single-session leaderboard risk fields focused on single-game extremes', () => {
     const [row] = aggregateLeaderboardRows([
       { playerId: 'u1', playerName: 'A', buyIn: 2000, netResult: 1000, rmbPer2000: 100 },
     ]);
 
-    expect(row.profitVolatility).toBe(0);
-    expect(row.maxDrawdown).toBe(0);
     expect(row.maxSingleProfit).toBe(1000);
     expect(row.maxSingleLoss).toBe(1000);
+    expect(row).not.toHaveProperty('profitVolatility');
+    expect(row).not.toHaveProperty('maxDrawdown');
   });
 
   it('supports sort metric avgProfit, amount, avgAmount and winningGames in analytics utilities', () => {

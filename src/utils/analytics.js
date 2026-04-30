@@ -11,31 +11,6 @@ function getRowTimestamp(row) {
   return Number.isNaN(d.getTime()) ? 0 : d.getTime();
 }
 
-function calculateVolatility(values) {
-  const list = Array.isArray(values) ? values : [];
-  if (list.length <= 1) return 0;
-  const avg = list.reduce((sum, value) => sum + value, 0) / list.length;
-  const variance = list.reduce((sum, value) => sum + (value - avg) ** 2, 0) / list.length;
-  return Math.round(Math.sqrt(variance));
-}
-
-function calculateMaxDrawdown(values) {
-  const list = Array.isArray(values) ? values : [];
-  if (list.length <= 1) return 0;
-
-  let running = 0;
-  let peak = 0;
-  let maxDrawdown = 0;
-
-  list.forEach((value) => {
-    running += value;
-    peak = Math.max(peak, running);
-    maxDrawdown = Math.max(maxDrawdown, peak - running);
-  });
-
-  return Math.round(maxDrawdown);
-}
-
 function beijingTimeToUtc(year, monthIndex, day, hour = 0, minute = 0, second = 0, ms = 0) {
   return new Date(Date.UTC(year, monthIndex, day, hour - BEIJING_OFFSET_HOURS, minute, second, ms));
 }
@@ -154,8 +129,6 @@ export function aggregateLeaderboardRows(rows) {
       avgAmountPerSession: Number(avgAmountPerSession.toFixed(2)),
       maxSingleProfit,
       maxSingleLoss,
-      profitVolatility: calculateVolatility(orderedResults),
-      maxDrawdown: calculateMaxDrawdown(orderedResults),
       roi: Number(roi.toFixed(1)),
       winRate: Number(winRate.toFixed(1)),
     };
