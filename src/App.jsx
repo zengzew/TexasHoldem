@@ -3919,9 +3919,9 @@ export default function App() {
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-base font-semibold text-slate-900">近 10 局盈亏趋势</h3>
               </div>
-              <div className="relative mt-4 h-40 rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
-                <div className="absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
-                <div className="relative grid h-full grid-flow-col auto-cols-fr gap-1.5 sm:gap-2">
+              <div className="tab-scroll relative mt-4 h-40 overflow-x-auto overflow-y-visible rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
+                <div className="pointer-events-none absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
+                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[3.65rem] gap-1 sm:min-w-full sm:auto-cols-fr sm:gap-2">
                   {personalDashboardTrend.map((row) => {
                     const net = Number(row.netResult || 0);
                     const isZero = net === 0;
@@ -3933,10 +3933,10 @@ export default function App() {
                         type="button"
                         title={tooltip}
                         aria-label={tooltip}
-                        className="group relative h-full min-w-[1.4rem] focus:outline-none"
+                        className="group relative h-full min-w-[3.65rem] focus:outline-none sm:min-w-[2.6rem]"
                       >
                         <span
-                          className={`absolute left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums ${
+                          className={`absolute left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/95 px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums ${
                             net > 0 ? 'text-emerald-600' : net < 0 ? 'text-rose-600' : 'text-slate-500'
                           }`}
                           style={
