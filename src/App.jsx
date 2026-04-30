@@ -4116,14 +4116,6 @@ export default function App() {
                         {toChips(Math.max(0, -Number(p.maxSingleLoss || 0)))}
                       </p>
                     </div>
-                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
-                      <p>波动率</p>
-                      <p className="mt-0.5 font-semibold text-slate-900">{toChips(p.profitVolatility)}</p>
-                    </div>
-                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
-                      <p>最大回撤</p>
-                      <p className="mt-0.5 font-semibold text-rose-600">{toChips(p.maxDrawdown)}</p>
-                    </div>
                   </div>
                 )}
               </article>
