@@ -18,6 +18,7 @@ export function aggregatePersonalDashboard(rows) {
   const totalBuyIn = list.reduce((sum, row) => sum + Math.max(0, toChipInt(row?.buyIn)), 0);
   const totalProfit = list.reduce((sum, row) => sum + toChipInt(row?.netResult), 0);
   const totalAmountRmb = list.reduce((sum, row) => sum + toNumber(row?.amountRmb, 0), 0);
+  const netResults = list.map((row) => toChipInt(row?.netResult));
 
   return {
     totalSessions,
@@ -27,6 +28,8 @@ export function aggregatePersonalDashboard(rows) {
     totalAmountRmb: toMoney(totalAmountRmb),
     avgProfitPerSession: totalSessions ? Math.round(totalProfit / totalSessions) : 0,
     avgAmountPerSession: totalSessions ? toMoney(totalAmountRmb / totalSessions) : 0,
+    maxSingleProfit: netResults.length ? Math.max(0, ...netResults) : 0,
+    maxSingleLoss: netResults.length ? Math.min(0, ...netResults) : 0,
   };
 }
 

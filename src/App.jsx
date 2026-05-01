@@ -600,34 +600,13 @@ export default function App() {
     () => (showAllLeaderboard ? rankedLeaderboard : rankedLeaderboard.slice(0, LEADERBOARD_COLLAPSED_COUNT)),
     [rankedLeaderboard, showAllLeaderboard, LEADERBOARD_COLLAPSED_COUNT]
   );
-  const filteredPersonalDashboardRows = useMemo(
-    () => filterRowsByDateRange(personalDashboardRows, selectedDateRange),
-    [personalDashboardRows, selectedDateRange]
-  );
-  const effectivePersonalDashboardRows = useMemo(() => {
-    const isDefaultWindow =
-      datePreset === 'all' &&
-      customStartDate === defaultStartDate &&
-      customEndDate === defaultEndDate;
-    if (isDefaultWindow && filteredPersonalDashboardRows.length === 0 && personalDashboardRows.length > 0) {
-      return personalDashboardRows;
-    }
-    return filteredPersonalDashboardRows;
-  }, [
-    datePreset,
-    customStartDate,
-    customEndDate,
-    defaultStartDate,
-    defaultEndDate,
-    filteredPersonalDashboardRows,
-    personalDashboardRows,
-  ]);
+  const effectivePersonalDashboardRows = personalDashboardRows;
   const personalDashboardSummary = useMemo(
     () => aggregatePersonalDashboard(effectivePersonalDashboardRows),
     [effectivePersonalDashboardRows]
   );
   const personalDashboardTrend = useMemo(
-    () => buildPersonalTrend(effectivePersonalDashboardRows, 10),
+    () => buildPersonalTrend(effectivePersonalDashboardRows),
     [effectivePersonalDashboardRows]
   );
   const personalTrendMaxAbs = useMemo(
@@ -3862,7 +3841,6 @@ export default function App() {
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2.5">
           <h2 className="text-xl font-semibold leading-none text-ink sm:text-2xl">个人看板</h2>
         </div>
-        <div className="mt-2 w-full">{renderDatePopover()}</div>
 
         {!effectivePersonalDashboardRows.length && (
           <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-4 py-3 text-sm text-slate-500 shadow-sm backdrop-blur-md">
@@ -3899,6 +3877,20 @@ export default function App() {
                   value: `盈利 ${personalDashboardSummary.winningGames}/${personalDashboardSummary.totalSessions}`,
                   tone: personalDashboardSummary.winningGames > 0 ? 'text-emerald-600' : 'text-slate-900',
                 },
+                {
+                  label: '总买入',
+                  value: `${toChips(personalDashboardSummary.totalBuyIn)} 积分`,
+                },
+                {
+                  label: '最大单局盈利',
+                  value: `${toChips(personalDashboardSummary.maxSingleProfit)} 积分`,
+                  tone: personalDashboardSummary.maxSingleProfit > 0 ? 'text-emerald-600' : 'text-slate-900',
+                },
+                {
+                  label: '最大单局亏损',
+                  value: `${toChips(personalDashboardSummary.maxSingleLoss)} 积分`,
+                  tone: personalDashboardSummary.maxSingleLoss < 0 ? 'text-rose-600' : 'text-slate-900',
+                },
               ].map((item, index) => (
                 <div
                   key={item.label}
@@ -3919,11 +3911,12 @@ export default function App() {
               </div>
               <div className="tab-scroll relative mt-4 h-40 overflow-x-auto overflow-y-visible rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
                 <div className="pointer-events-none absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
-                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[2.25rem] gap-0.5 px-5 sm:min-w-full sm:auto-cols-fr sm:gap-2 sm:px-6">
+                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[2.75rem] gap-1 px-10 sm:min-w-full sm:auto-cols-fr sm:gap-2 sm:px-8">
                   {personalDashboardTrend.map((row) => {
                     const net = Number(row.netResult || 0);
                     const isZero = net === 0;
                     const height = isZero ? 2 : Math.max(10, Math.min(46, (Math.abs(net) / personalTrendMaxAbs) * 44));
+                    const labelOffset = row.ordinal % 2 === 0 ? 1.1 : 0.25;
                     const tooltip = `房间 ${row.sessionId}\n${formatDateTime(row.createdAt)}\n${toChips(net)} 积分 · ${toRmb(row.amountRmb)}`;
                     return (
                       <button
@@ -3931,19 +3924,19 @@ export default function App() {
                         type="button"
                         title={tooltip}
                         aria-label={tooltip}
-                        className="group personal-trend-bar relative h-full min-w-[2.25rem] focus:outline-none sm:min-w-[2.6rem]"
+                        className="group personal-trend-bar relative h-full min-w-[2.75rem] focus:outline-none sm:min-w-[2.6rem]"
                         style={{ animationDelay: `${Math.min(row.ordinal, 16) * 24}ms` }}
                       >
                         <span
-                          className={`absolute left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/95 px-1 py-0.5 text-[9px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums sm:px-1.5 sm:text-[10px] ${
+                          className={`absolute left-1/2 z-[2] min-w-[3.35rem] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/95 px-1 py-0.5 text-center text-[9px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums sm:min-w-[3.7rem] sm:px-1.5 sm:text-[10px] ${
                             net > 0 ? 'text-emerald-600' : net < 0 ? 'text-rose-600' : 'text-slate-500'
                           }`}
                           style={
                             net > 0
-                              ? { bottom: `calc(50% + ${height}% + 0.25rem)` }
+                              ? { bottom: `calc(50% + ${height}% + ${labelOffset}rem)` }
                               : net < 0
-                                ? { top: `calc(50% + ${height}% + 0.25rem)` }
-                                : { top: 'calc(50% + 0.35rem)' }
+                                ? { top: `calc(50% + ${height}% + ${labelOffset}rem)` }
+                                : { top: `calc(50% + ${labelOffset}rem)` }
                           }
                         >
                           {net > 0 ? '+' : ''}
@@ -4045,7 +4038,9 @@ export default function App() {
                           />
                         )}
                       </h3>
-                      <p className="mt-1 truncate text-xs text-slate-500">总局数 {p.totalSessions}</p>
+                      <p className="mt-1 truncate text-xs text-slate-500">
+                        盈利 {p.winningGames}/{p.totalSessions}
+                      </p>
                     </div>
                     <div className="w-[6.5rem] text-right sm:w-28">
                       <p
@@ -4061,10 +4056,6 @@ export default function App() {
                 </button>
                 {expanded && (
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-3">
-                    <div className="rounded-xl bg-slate-50 px-2.5 py-2">
-                      <p>总局数</p>
-                      <p className="mt-0.5 font-semibold text-slate-900">{p.totalSessions}</p>
-                    </div>
                     <div className="rounded-xl bg-slate-50 px-2.5 py-2">
                       <p>盈利场次</p>
                       <p className="mt-0.5 font-semibold text-slate-900">

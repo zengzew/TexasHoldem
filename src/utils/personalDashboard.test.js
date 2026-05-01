@@ -39,6 +39,8 @@ describe('personal dashboard helpers', () => {
       totalAmountRmb: 25,
       avgProfitPerSession: 167,
       avgAmountPerSession: 8.33,
+      maxSingleProfit: 1000,
+      maxSingleLoss: -500,
     });
   });
 
