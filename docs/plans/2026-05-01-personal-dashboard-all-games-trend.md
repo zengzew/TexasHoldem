@@ -29,7 +29,7 @@
 - Modify: `src/index.css`
 
 **Steps:**
-1. Rename chart title from `近 10 局盈亏趋势` to `全部对局盈亏趋势`.
+1. Rename chart title from `近 10 局盈亏趋势` to `盈亏趋势`.
 2. Reduce chart column width/gap for mobile so 8-10 bars are visible at once.
 3. Add subtle entry animations for personal summary cards and trend bars.
 4. Keep chart overflow horizontal only; avoid page-level horizontal overflow.

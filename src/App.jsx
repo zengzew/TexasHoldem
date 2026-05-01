@@ -592,10 +592,6 @@ export default function App() {
     filteredLeaderboardRows,
     leaderboardRows,
   ]);
-  const filteredLeaderboardSessionCount = useMemo(
-    () => new Set(effectiveLeaderboardRows.map((row) => row.sessionId)).size,
-    [effectiveLeaderboardRows]
-  );
   const rankedLeaderboard = useMemo(() => {
     const aggregated = aggregateLeaderboardRows(effectiveLeaderboardRows);
     return sortLeaderboardRows(aggregated, leaderboardView);
@@ -3865,10 +3861,6 @@ export default function App() {
       <section className={`${tabSlideClass} glass-card panel-fill mt-3 flex flex-col rounded-3xl p-4 sm:mt-4 sm:p-6`}>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2.5">
           <h2 className="text-xl font-semibold leading-none text-ink sm:text-2xl">个人看板</h2>
-          <div className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-sm shadow-sm backdrop-blur-md whitespace-nowrap">
-            <span className="text-slate-500">个人总局数</span>
-            <span className="font-semibold text-slate-900">{personalDashboardSummary.totalSessions}</span>
-          </div>
         </div>
         <div className="mt-2 w-full">{renderDatePopover()}</div>
 
@@ -3882,18 +3874,10 @@ export default function App() {
           <>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
-                { label: '总局数', value: personalDashboardSummary.totalSessions },
-                { label: '盈利场次', value: personalDashboardSummary.winningGames },
-                { label: '总买入', value: `${toChips(personalDashboardSummary.totalBuyIn)} 积分` },
                 {
                   label: '净盈利',
                   value: `${toChips(personalDashboardSummary.totalProfit)} 积分`,
                   tone: personalDashboardSummary.totalProfit >= 0 ? 'text-emerald-600' : 'text-rose-600',
-                },
-                {
-                  label: '净盈利金额',
-                  value: toRmb(personalDashboardSummary.totalAmountRmb),
-                  tone: personalDashboardSummary.totalAmountRmb >= 0 ? 'text-emerald-600' : 'text-rose-600',
                 },
                 {
                   label: '场均盈利',
@@ -3901,17 +3885,27 @@ export default function App() {
                   tone: personalDashboardSummary.avgProfitPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600',
                 },
                 {
+                  label: '金额',
+                  value: toRmb(personalDashboardSummary.totalAmountRmb),
+                  tone: personalDashboardSummary.totalAmountRmb >= 0 ? 'text-emerald-600' : 'text-rose-600',
+                },
+                {
                   label: '场均金额',
                   value: toRmb(personalDashboardSummary.avgAmountPerSession),
                   tone: personalDashboardSummary.avgAmountPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600',
                 },
+                {
+                  label: '盈利场次',
+                  value: `盈利 ${personalDashboardSummary.winningGames}/${personalDashboardSummary.totalSessions}`,
+                  tone: personalDashboardSummary.winningGames > 0 ? 'text-emerald-600' : 'text-slate-900',
+                },
               ].map((item, index) => (
                 <div
                   key={item.label}
-                  className="personal-dashboard-card rounded-2xl border border-white/80 bg-white/80 px-3 py-3 shadow-sm backdrop-blur-md"
+                  className="personal-dashboard-card min-w-0 rounded-2xl border border-white/80 bg-white/80 px-3 py-3 shadow-sm backdrop-blur-md"
                   style={{ animationDelay: `${index * 36}ms` }}
                 >
-                  <p className="text-xs font-semibold text-slate-500">{item.label}</p>
+                  <p className="whitespace-nowrap text-[11px] font-semibold leading-tight text-slate-500 sm:text-xs">{item.label}</p>
                   <p className={`mt-1 whitespace-nowrap text-base font-semibold tabular-nums ${item.tone || 'text-slate-900'}`}>
                     {item.value}
                   </p>
@@ -3921,11 +3915,11 @@ export default function App() {
 
             <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur-md">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold text-slate-900">全部对局盈亏趋势</h3>
+                <h3 className="text-base font-semibold text-slate-900">盈亏趋势</h3>
               </div>
               <div className="tab-scroll relative mt-4 h-40 overflow-x-auto overflow-y-visible rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
                 <div className="pointer-events-none absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
-                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[2.25rem] gap-0.5 sm:min-w-full sm:auto-cols-fr sm:gap-2">
+                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[2.25rem] gap-0.5 px-5 sm:min-w-full sm:auto-cols-fr sm:gap-2 sm:px-6">
                   {personalDashboardTrend.map((row) => {
                     const net = Number(row.netResult || 0);
                     const isZero = net === 0;
@@ -3993,10 +3987,6 @@ export default function App() {
       <section className={`${tabSlideClass} glass-card panel-fill mt-3 flex flex-col rounded-3xl p-4 sm:mt-4 sm:p-6`}>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2.5">
           <h2 className="text-xl font-semibold leading-none text-ink sm:text-2xl">历史积分榜</h2>
-          <div className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1.5 text-sm shadow-sm backdrop-blur-md whitespace-nowrap">
-              <span className="text-slate-500">累计总局数</span>
-              <span className="font-semibold text-slate-900">{filteredLeaderboardSessionCount}</span>
-          </div>
         </div>
         <div className="mt-2 w-full">{renderDatePopover()}</div>
         <div className="tab-scroll segmented-shell relative mt-3 min-h-[3.3rem] overflow-x-auto p-1">
