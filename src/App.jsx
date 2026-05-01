@@ -3905,8 +3905,12 @@ export default function App() {
                   value: toRmb(personalDashboardSummary.avgAmountPerSession),
                   tone: personalDashboardSummary.avgAmountPerSession >= 0 ? 'text-emerald-600' : 'text-rose-600',
                 },
-              ].map((item) => (
-                <div key={item.label} className="rounded-2xl border border-white/80 bg-white/80 px-3 py-3 shadow-sm backdrop-blur-md">
+              ].map((item, index) => (
+                <div
+                  key={item.label}
+                  className="personal-dashboard-card rounded-2xl border border-white/80 bg-white/80 px-3 py-3 shadow-sm backdrop-blur-md"
+                  style={{ animationDelay: `${index * 36}ms` }}
+                >
                   <p className="text-xs font-semibold text-slate-500">{item.label}</p>
                   <p className={`mt-1 whitespace-nowrap text-base font-semibold tabular-nums ${item.tone || 'text-slate-900'}`}>
                     {item.value}
@@ -3917,11 +3921,11 @@ export default function App() {
 
             <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur-md">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold text-slate-900">近 10 局盈亏趋势</h3>
+                <h3 className="text-base font-semibold text-slate-900">全部对局盈亏趋势</h3>
               </div>
               <div className="tab-scroll relative mt-4 h-40 overflow-x-auto overflow-y-visible rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
                 <div className="pointer-events-none absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
-                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[3.65rem] gap-1 sm:min-w-full sm:auto-cols-fr sm:gap-2">
+                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[2.25rem] gap-0.5 sm:min-w-full sm:auto-cols-fr sm:gap-2">
                   {personalDashboardTrend.map((row) => {
                     const net = Number(row.netResult || 0);
                     const isZero = net === 0;
@@ -3933,10 +3937,11 @@ export default function App() {
                         type="button"
                         title={tooltip}
                         aria-label={tooltip}
-                        className="group relative h-full min-w-[3.65rem] focus:outline-none sm:min-w-[2.6rem]"
+                        className="group personal-trend-bar relative h-full min-w-[2.25rem] focus:outline-none sm:min-w-[2.6rem]"
+                        style={{ animationDelay: `${Math.min(row.ordinal, 16) * 24}ms` }}
                       >
                         <span
-                          className={`absolute left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/95 px-1.5 py-0.5 text-[10px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums ${
+                          className={`absolute left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/95 px-1 py-0.5 text-[9px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums sm:px-1.5 sm:text-[10px] ${
                             net > 0 ? 'text-emerald-600' : net < 0 ? 'text-rose-600' : 'text-slate-500'
                           }`}
                           style={

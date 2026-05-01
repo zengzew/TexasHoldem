@@ -30,10 +30,12 @@ export function aggregatePersonalDashboard(rows) {
   };
 }
 
-export function buildPersonalTrend(rows, limit = 10) {
-  const list = [...(Array.isArray(rows) ? rows : [])]
-    .sort((a, b) => new Date(a?.createdAt || 0).getTime() - new Date(b?.createdAt || 0).getTime())
-    .slice(-Math.max(0, limit));
+export function buildPersonalTrend(rows, limit = Infinity) {
+  const sorted = [...(Array.isArray(rows) ? rows : [])].sort(
+    (a, b) => new Date(a?.createdAt || 0).getTime() - new Date(b?.createdAt || 0).getTime()
+  );
+  const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.round(limit)) : sorted.length;
+  const list = sorted.slice(-normalizedLimit);
 
   return list.map((row, index) => ({
     sessionId: row?.sessionId || '',

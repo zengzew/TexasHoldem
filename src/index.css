@@ -371,6 +371,17 @@
     will-change: opacity, transform;
   }
 
+  .personal-dashboard-card {
+    animation: personal-dashboard-card-in 280ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+    will-change: opacity, transform;
+  }
+
+  .personal-trend-bar {
+    animation: personal-trend-bar-in 320ms cubic-bezier(0.16, 0.86, 0.24, 1) both;
+    transform-origin: bottom center;
+    will-change: opacity, transform;
+  }
+
   .refresh-spin-once {
     animation: refresh-spin-once 520ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
@@ -450,6 +461,28 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes personal-dashboard-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes personal-trend-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scaleY(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
   }
 }
 
