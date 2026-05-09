@@ -261,6 +261,7 @@ export default function App() {
   const [personalDashboardRows, setPersonalDashboardRows] = useState([]);
   const [personalDashboardLoaded, setPersonalDashboardLoaded] = useState(false);
   const [personalDashboardLoading, setPersonalDashboardLoading] = useState(false);
+  const [activePersonalTrendKey, setActivePersonalTrendKey] = useState('');
   const [historySessions, setHistorySessions] = useState([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState('');
   const [historyPage, setHistoryPage] = useState(1);
@@ -613,6 +614,13 @@ export default function App() {
     () => Math.max(1, ...personalDashboardTrend.map((row) => Math.abs(Number(row.netResult || 0)))),
     [personalDashboardTrend]
   );
+  const activePersonalTrend = useMemo(
+    () =>
+      personalDashboardTrend.find(
+        (row) => `${row.sessionId}-${row.ordinal}` === activePersonalTrendKey
+      ) || null,
+    [activePersonalTrendKey, personalDashboardTrend]
+  );
   const filteredHistorySessions = useMemo(
     () => historySessions,
     [historySessions]
@@ -775,6 +783,17 @@ export default function App() {
     const n = Number(value || 0);
     if (!Number.isFinite(n)) return '0';
     return String(Math.round(n));
+  }
+
+  function toCompactChips(value) {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return '0';
+    const rounded = Math.round(n);
+    const sign = rounded > 0 ? '+' : rounded < 0 ? '-' : '';
+    const abs = Math.abs(rounded);
+    if (abs >= 10000) return `${sign}${(abs / 1000).toFixed(1).replace(/\\.0$/, '')}k`;
+    if (abs >= 1000) return `${sign}${(abs / 1000).toFixed(1).replace(/\\.0$/, '')}k`;
+    return `${sign}${abs}`;
   }
 
   function toChipInt(value) {
@@ -3909,65 +3928,77 @@ export default function App() {
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-base font-semibold text-slate-900">盈亏趋势</h3>
               </div>
-              <div className="tab-scroll relative mt-4 h-40 overflow-x-auto overflow-y-visible rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
-                <div className="pointer-events-none absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
-                <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[2.75rem] gap-1 px-10 sm:min-w-full sm:auto-cols-fr sm:gap-2 sm:px-8">
-                  {personalDashboardTrend.map((row) => {
-                    const net = Number(row.netResult || 0);
-                    const isZero = net === 0;
-                    const height = isZero ? 2 : Math.max(10, Math.min(46, (Math.abs(net) / personalTrendMaxAbs) * 44));
-                    const labelOffset = row.ordinal % 2 === 0 ? 1.1 : 0.25;
-                    const tooltip = `房间 ${row.sessionId}\n${formatDateTime(row.createdAt)}\n${toChips(net)} 积分 · ${toRmb(row.amountRmb)}`;
-                    return (
-                      <button
-                        key={`${row.sessionId}-${row.ordinal}`}
-                        type="button"
-                        title={tooltip}
-                        aria-label={tooltip}
-                        className="group personal-trend-bar relative h-full min-w-[2.75rem] focus:outline-none sm:min-w-[2.6rem]"
-                        style={{ animationDelay: `${Math.min(row.ordinal, 16) * 24}ms` }}
-                      >
-                        <span
-                          className={`absolute left-1/2 z-[2] min-w-[3.35rem] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/95 px-1 py-0.5 text-center text-[9px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums sm:min-w-[3.7rem] sm:px-1.5 sm:text-[10px] ${
-                            net > 0 ? 'text-emerald-600' : net < 0 ? 'text-rose-600' : 'text-slate-500'
-                          }`}
-                          style={
-                            net > 0
-                              ? { bottom: `calc(50% + ${height}% + ${labelOffset}rem)` }
-                              : net < 0
-                                ? { top: `calc(50% + ${height}% + ${labelOffset}rem)` }
-                                : { top: `calc(50% + ${labelOffset}rem)` }
-                          }
+              <div className="relative mt-4">
+                {activePersonalTrend && (
+                  <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[calc(100%-1.5rem)] rounded-2xl border border-white/85 bg-white/95 px-3 py-2 text-left text-xs font-medium text-slate-700 shadow-xl backdrop-blur-md sm:left-1/2 sm:-translate-x-1/2">
+                    <span className="block whitespace-nowrap">房间 {activePersonalTrend.sessionId}</span>
+                    <span className="block whitespace-nowrap">{formatDateTime(activePersonalTrend.createdAt)}</span>
+                    <span
+                      className={`block whitespace-nowrap ${
+                        Number(activePersonalTrend.netResult || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                      }`}
+                    >
+                      {toChips(activePersonalTrend.netResult)} 积分 · {toRmb(activePersonalTrend.amountRmb)}
+                    </span>
+                  </div>
+                )}
+                <div className="tab-scroll relative h-40 overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-100 bg-white/70 px-3 py-4">
+                  <div className="pointer-events-none absolute left-3 right-3 top-1/2 border-t border-slate-200/90" aria-hidden />
+                  <div className="relative grid h-full min-w-max grid-flow-col auto-cols-[2.45rem] gap-0.5 px-14 sm:min-w-full sm:auto-cols-fr sm:gap-2 sm:px-10">
+                    {personalDashboardTrend.map((row) => {
+                      const trendKey = `${row.sessionId}-${row.ordinal}`;
+                      const net = Number(row.netResult || 0);
+                      const isZero = net === 0;
+                      const height = isZero ? 2 : Math.max(10, Math.min(46, (Math.abs(net) / personalTrendMaxAbs) * 44));
+                      const labelOffset = row.ordinal % 2 === 0 ? 1.1 : 0.25;
+                      const tooltip = `房间 ${row.sessionId}\n${formatDateTime(row.createdAt)}\n${toChips(net)} 积分 · ${toRmb(row.amountRmb)}`;
+                      return (
+                        <button
+                          key={trendKey}
+                          type="button"
+                          title={tooltip}
+                          aria-label={tooltip}
+                          className="group personal-trend-bar relative h-full min-w-[2.45rem] focus:outline-none sm:min-w-[2.6rem]"
+                          style={{ animationDelay: `${Math.min(row.ordinal, 16) * 24}ms` }}
+                          onBlur={() => setActivePersonalTrendKey('')}
+                          onFocus={() => setActivePersonalTrendKey(trendKey)}
+                          onMouseEnter={() => setActivePersonalTrendKey(trendKey)}
+                          onMouseLeave={() => setActivePersonalTrendKey('')}
                         >
-                          {net > 0 ? '+' : ''}
-                          {toChips(net)}
-                        </span>
-                        <span
-                          className={`absolute left-1/2 w-4 -translate-x-1/2 rounded-full transition ${
-                            net > 0
-                              ? 'bg-emerald-400/85 shadow-[0_8px_18px_rgba(16,185,129,0.22)]'
-                              : net < 0
-                                ? 'bg-rose-400/85 shadow-[0_8px_18px_rgba(244,63,94,0.22)]'
-                                : 'bg-slate-300'
-                          }`}
-                          style={
-                            net > 0
-                              ? { bottom: '50%', height: `${height}%` }
-                              : net < 0
-                                ? { top: '50%', height: `${height}%` }
-                                : { top: '50%', height: '0.25rem' }
-                          }
-                        />
-                        <span className="absolute -top-11 left-1/2 z-10 hidden w-40 -translate-x-1/2 rounded-xl border border-white/80 bg-white/95 px-3 py-2 text-left text-[11px] font-medium text-slate-700 shadow-lg backdrop-blur-md group-hover:block group-focus:block">
-                          <span className="block truncate">房间 {row.sessionId}</span>
-                          <span className="block truncate">{formatDateTime(row.createdAt)}</span>
-                          <span className={`block ${net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {toChips(net)} 积分 · {toRmb(row.amountRmb)}
+                          <span
+                            className={`absolute left-1/2 z-[2] min-w-[2.65rem] -translate-x-1/2 whitespace-nowrap rounded-full border border-white/80 bg-white/95 px-1 py-0.5 text-center text-[9px] font-semibold leading-none shadow-sm backdrop-blur-md tabular-nums sm:min-w-[3rem] sm:px-1.5 sm:text-[10px] ${
+                              net > 0 ? 'text-emerald-600' : net < 0 ? 'text-rose-600' : 'text-slate-500'
+                            }`}
+                            style={
+                              net > 0
+                                ? { bottom: `calc(50% + ${height}% + ${labelOffset}rem)` }
+                                : net < 0
+                                  ? { top: `calc(50% + ${height}% + ${labelOffset}rem)` }
+                                  : { top: `calc(50% + ${labelOffset}rem)` }
+                            }
+                          >
+                            {toCompactChips(net)}
                           </span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                          <span
+                            className={`absolute left-1/2 w-4 -translate-x-1/2 rounded-full transition ${
+                              net > 0
+                                ? 'bg-emerald-400/85 shadow-[0_8px_18px_rgba(16,185,129,0.22)]'
+                                : net < 0
+                                  ? 'bg-rose-400/85 shadow-[0_8px_18px_rgba(244,63,94,0.22)]'
+                                  : 'bg-slate-300'
+                            }`}
+                            style={
+                              net > 0
+                                ? { bottom: '50%', height: `${height}%` }
+                                : net < 0
+                                  ? { top: '50%', height: `${height}%` }
+                                  : { top: '50%', height: '0.25rem' }
+                            }
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
