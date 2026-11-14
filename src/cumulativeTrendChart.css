@@ -22,7 +22,6 @@
 }
 
 .trend-landscape-content {
-  container-type: size;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -33,14 +32,8 @@
 
 .trend-inline-players,
 .trend-landscape-players {
-  max-height: 7.75rem;
+  max-height: 5.125rem;
   overflow-y: auto;
-}
-
-@container (max-height: 400px) {
-  .trend-landscape-players {
-    max-height: 5.125rem;
-  }
 }
 
 @media (orientation: portrait) {

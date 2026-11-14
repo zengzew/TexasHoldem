@@ -17,6 +17,7 @@ const years = new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric' });
 const hours = new Intl.DateTimeFormat('zh-CN', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const CHART_MARGIN = { top: 24, right: 12, bottom: 0, left: 5 };
 const TICK_STYLE = { fill: '#475569', fontSize: 11 };
+const PREFERRED_AXIS_MIN = -75_000;
 
 function formatShortScore(score) {
   return shortScores.format(score).replace('-', '−').replace('K', 'k');
@@ -37,7 +38,11 @@ function scoreTicks(series) {
   const step = Math.max(1, [1, 2, 5, 10].find((n) => n * power >= rough) * power);
   const first = Math.floor(min / step);
   const last = Math.ceil(max / step);
-  return Array.from({ length: last - first + 1 }, (_, i) => (first + i) * step);
+  const ticks = Array.from({ length: last - first + 1 }, (_, i) => (first + i) * step);
+  if (min >= PREFERRED_AXIS_MIN && ticks[0] < PREFERRED_AXIS_MIN) {
+    return [PREFERRED_AXIS_MIN, ...ticks.filter((tick) => tick > PREFERRED_AXIS_MIN)];
+  }
+  return ticks;
 }
 
 export default function CumulativeTrendChart({ rows, loaded, loading, error, onRetry, formatDateTime }) {
