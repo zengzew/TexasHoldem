@@ -104,6 +104,16 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
   const activePoints = cursor
     ? new Map(visible.map(({ playerId, points }) => [playerId, findTrendPoint(points, cursorIndex)]))
     : null;
+  const ranking = cursor ? visible.flatMap(({ name, playerId, color, points }) => {
+    const point = points.findLast(({ sessionIndex }) => sessionIndex <= cursorIndex);
+    return point ? [{ name, playerId, color, score: point.score }] : [];
+  }).sort((a, b) => b.score - a.score) : [];
+  const tooltipWidth = Math.min(208, Math.max(0, width - 8));
+  const cursorX = plotLeft + (width - plotLeft - CHART_MARGIN.right)
+    * (lastIndex > 0 ? cursorIndex / lastIndex : 0.5);
+  const tooltipLeft = cursorX + tooltipWidth + 12 <= width
+    ? cursorX + 8
+    : Math.max(4, cursorX - tooltipWidth - 8);
 
   function selectSession(event) {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -200,7 +210,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
             <div
               ref={plotRef}
               role="group"
-              className={`relative w-full cursor-crosshair rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500 ${showLandscape ? 'min-h-0 flex-1 touch-none' : 'h-[208px] touch-pan-y'}`}
+              className={`relative w-full cursor-crosshair rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500 ${showLandscape ? 'min-h-0 flex-1' : 'h-[208px] touch-pan-y'}`}
               aria-label="累计积分趋势，时间为北京时间。手机端可点按展开横屏。使用左右方向键切换对局"
               tabIndex={0}
               onKeyDown={handleKeyDown}
@@ -211,6 +221,27 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                 <span className="pointer-events-none absolute right-3 top-0.5 z-10 text-[11px] font-medium text-slate-600">
                   {formatDateTime(cursor.time)}
                 </span>
+              )}
+              {ranking.length > 0 && (
+                <div
+                  className="absolute top-6 z-20 max-h-[calc(100%-3.25rem)] cursor-auto overflow-auto overscroll-contain rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-700 shadow-md"
+                  style={{ left: tooltipLeft, width: tooltipWidth }}
+                  onPointerMove={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <ol aria-label="该场次累计积分排名" className="space-y-1">
+                    {ranking.map(({ playerId, name, color, score }) => (
+                      <li key={playerId} className="flex items-center gap-1.5">
+                        <span className="shrink-0 tabular-nums text-slate-500">
+                          {ranking.findIndex((player) => player.score === score) + 1}
+                        </span>
+                        <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                        <span className="min-w-0 flex-1 truncate" title={name}>{name}</span>
+                        <span className="shrink-0 tabular-nums">{scores.format(score)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
               )}
               {cursor == null && !showLandscape && (
                 <span aria-hidden="true" className="trend-expand-icon pointer-events-none absolute right-3 top-0.5 z-10 text-base leading-none text-slate-500">⤢</span>
@@ -265,6 +296,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                       strokeLinejoin="round"
                       strokeLinecap="round"
                       dot={false}
+                      activeDot={false}
                       isAnimationActive={false}
                     />
                   ))}
