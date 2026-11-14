@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { hasSupabaseConfig, supabase, supabaseConfigError } from './supabase';
 import { APP_NAME } from './constants';
 import { todayRoomId, validateAndBuildSettlement } from './utils/game';
@@ -39,6 +39,8 @@ import chevronDownIcon from './assets/chevron-down.svg';
 import medalGoldIcon from './assets/medal-gold.svg';
 import medalSilverIcon from './assets/medal-silver.svg';
 import medalBronzeIcon from './assets/medal-bronze.svg';
+
+const CumulativeTrendChart = lazy(() => import('./CumulativeTrendChart'));
 
 function EyeIcon() {
   return (
@@ -258,6 +260,7 @@ export default function App() {
   const [showAllLeaderboard, setShowAllLeaderboard] = useState(false);
   const [leaderboardLoaded, setLeaderboardLoaded] = useState(false);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardLoadError, setLeaderboardLoadError] = useState(false);
   const [personalDashboardRows, setPersonalDashboardRows] = useState([]);
   const [personalDashboardLoaded, setPersonalDashboardLoaded] = useState(false);
   const [personalDashboardLoading, setPersonalDashboardLoading] = useState(false);
@@ -696,7 +699,8 @@ export default function App() {
 
   function hydrateCachedTabData(userId) {
     const leaderboardCache = loadLeaderboardCache(userId);
-    if (leaderboardCache && Array.isArray(leaderboardCache.rows)) {
+    setLeaderboardLoadError(false);
+    if (leaderboardCache?.version === 2 && Array.isArray(leaderboardCache.rows)) {
       leaderboardFreshnessRef.current = leaderboardCache.freshness || { settledCount: 0 };
       setLeaderboardRows(leaderboardCache.rows);
       setLeaderboardLoaded(true);
@@ -1031,67 +1035,44 @@ export default function App() {
     if (leaderboardLoadPromiseRef.current) return leaderboardLoadPromiseRef.current;
 
     setLeaderboardLoading(true);
+    setLeaderboardLoadError(false);
     const request = (async () => {
-      const { data: rows, error: rowsErr } = await supabase
-        .from('session_players')
-        .select('session_id,player_id,buy_in,net_result')
-        .limit(20000);
-      if (rowsErr) throw rowsErr;
+      const mapped = [];
+      const sessionIds = new Set();
+      const profiles = new Map();
+      let lastId = null;
+      // Continue even after a short page: the Data API can cap the requested page size.
+      while (true) {
+        const query = supabase
+          .from('session_players')
+          .select('id,session_id,player_id,buy_in,net_result,sessions!inner(created_at,rmb_per_2000),profiles(nickname)')
+          .eq('sessions.status', 'settled')
+          .order('id')
+          .limit(1000);
+        const { data, error } = await (lastId == null ? query : query.gt('id', lastId));
+        if (error) throw error;
+        if (!data.length) break;
+        lastId = data.at(-1).id;
 
-      const sessionIds = [...new Set((rows || []).map((row) => row.session_id).filter(Boolean))];
-      if (!sessionIds.length || !(rows || []).length) {
-        const emptyPayload = { rows: [], freshness: { settledCount: 0 } };
-        leaderboardFreshnessRef.current = emptyPayload.freshness;
-        saveLeaderboardCache(user.id, emptyPayload);
-        setLeaderboardRows([]);
-        setLeaderboardLoaded(true);
-        return [];
+        for (const row of data) {
+          sessionIds.add(row.session_id);
+          if (row.profiles?.nickname) profiles.set(row.player_id, { id: row.player_id, nickname: row.profiles.nickname });
+          mapped.push({
+            sessionId: row.session_id,
+            playerId: row.player_id,
+            playerName: row.profiles?.nickname || 'Unknown',
+            buyIn: toNonNegativeChipInt(row.buy_in),
+            netResult: toChipInt(row.net_result),
+            createdAt: row.sessions.created_at,
+            rmbPer2000: Number(row.sessions.rmb_per_2000 || DEFAULT_RMB_PER_2000),
+          });
+        }
       }
+      cacheProfileNames([...profiles.values()]);
 
-      const { data: sessions, error: sessionsErr } = await supabase
-        .from('sessions')
-        .select('id,created_at,rmb_per_2000')
-        .in('id', sessionIds);
-      if (sessionsErr) throw sessionsErr;
-
-      const sessionMeta = new Map(
-        (sessions || []).map((row) => [
-          row.id,
-          {
-            createdAt: row.created_at,
-            rmbPer2000: Number(row.rmb_per_2000 || DEFAULT_RMB_PER_2000),
-          },
-        ])
-      );
-
-      const playerIds = [...new Set((rows || []).map((row) => row.player_id).filter(Boolean))];
-      let names = new Map();
-      if (playerIds.length) {
-      const { data: profiles, error: profileErr } = await supabase
-        .from('profiles')
-        .select('id,nickname,total_games,winning_games')
-        .in('id', playerIds);
-      if (profileErr) throw profileErr;
-      cacheProfileNames(profiles || []);
-      names = new Map((profiles || []).map((p) => [p.id, p.nickname]));
-      }
-
-      const mapped = (rows || []).map((row) => {
-        const meta = sessionMeta.get(row.session_id) || {};
-        return {
-          sessionId: row.session_id,
-          playerId: row.player_id,
-          playerName: names.get(row.player_id) || 'Unknown',
-          buyIn: toNonNegativeChipInt(row.buy_in),
-          netResult: toChipInt(row.net_result),
-          createdAt: meta.createdAt || null,
-          rmbPer2000: Number(meta.rmbPer2000 || DEFAULT_RMB_PER_2000),
-        };
-      });
-
-      const nextFreshness = { settledCount: sessionIds.length };
+      const nextFreshness = { settledCount: sessionIds.size };
       leaderboardFreshnessRef.current = nextFreshness;
-      saveLeaderboardCache(user.id, { rows: mapped, freshness: nextFreshness });
+      saveLeaderboardCache(user.id, { version: 2, rows: mapped, freshness: nextFreshness });
       setLeaderboardRows(mapped);
       setLeaderboardLoaded(true);
       return mapped;
@@ -1100,6 +1081,9 @@ export default function App() {
     leaderboardLoadPromiseRef.current = request;
     try {
       return await request;
+    } catch (error) {
+      setLeaderboardLoadError(true);
+      throw error;
     } finally {
       leaderboardLoadPromiseRef.current = null;
       setLeaderboardLoading(false);
@@ -1517,7 +1501,7 @@ export default function App() {
     const currentTab = activeTabRef.current;
     let freshness = null;
 
-    const shouldConsiderLeaderboard = leaderboard && (currentTab === 'leaderboard' || leaderboardLoadedRef.current);
+    const shouldConsiderLeaderboard = leaderboard && (currentTab === 'leaderboard' || currentTab === 'personal' || leaderboardLoadedRef.current);
     const shouldConsiderPersonalDashboard =
       personalDashboard && (currentTab === 'personal' || personalDashboardLoadedRef.current);
     const shouldConsiderHistory = history && (currentTab === 'history' || historyLoadedRef.current);
@@ -2748,6 +2732,7 @@ export default function App() {
     setLeaderboardRows([]);
     setLeaderboardLoaded(false);
     setLeaderboardLoading(false);
+    setLeaderboardLoadError(false);
     leaderboardFreshnessRef.current = { settledCount: 0 };
     setPersonalDashboardRows([]);
     setPersonalDashboardLoaded(false);
@@ -2944,11 +2929,10 @@ export default function App() {
 
   useEffect(() => {
     if (!hasSupabaseConfig || !user) return;
-    if (!shouldLoadTabData({ activeTab, targetTab: 'leaderboard', loaded: leaderboardLoaded, loading: leaderboardLoading })) {
-      return;
-    }
+    if (activeTab !== 'leaderboard' && activeTab !== 'personal') return;
+    if (leaderboardLoaded || leaderboardLoading || leaderboardLoadError) return;
     loadLeaderboard().catch((err) => showNotice(err.message, 'error'));
-  }, [activeTab, user, leaderboardLoaded, leaderboardLoading]);
+  }, [activeTab, user, leaderboardLoaded, leaderboardLoading, leaderboardLoadError]);
 
   useEffect(() => {
     if (!hasSupabaseConfig || !user) return;
@@ -3253,7 +3237,7 @@ export default function App() {
               }
               onClick={() => handleTabChange('personal')}
             >
-              个人看板
+              看板
             </button>
           </div>
         </div>
@@ -3858,9 +3842,22 @@ export default function App() {
       {activeTab === 'personal' && (
       <section className={`${tabSlideClass} glass-card panel-fill mt-3 flex flex-col rounded-3xl p-4 sm:mt-4 sm:p-6`}>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2.5">
-          <h2 className="text-xl font-semibold leading-none text-ink sm:text-2xl">个人看板</h2>
+          <h2 className="text-xl font-semibold leading-none text-ink sm:text-2xl">看板</h2>
         </div>
 
+        <Suspense fallback={<div role="status" aria-label="加载中" className="mt-4 rounded-2xl bg-white/80 p-4 text-slate-500">…</div>}>
+          <CumulativeTrendChart
+            key={user.id}
+            rows={leaderboardRows}
+            loaded={leaderboardLoaded}
+            loading={leaderboardLoading}
+            error={leaderboardLoadError}
+            onRetry={() => loadLeaderboard({ force: true }).catch((err) => showNotice(err.message, 'error'))}
+            formatDateTime={formatDateTime}
+          />
+        </Suspense>
+
+        <h3 className="mt-5 text-base font-semibold text-slate-900">个人统计</h3>
         {!effectivePersonalDashboardRows.length && (
           <div className="mt-3 rounded-2xl border border-white/80 bg-white/80 px-4 py-3 text-sm text-slate-500 shadow-sm backdrop-blur-md">
             {personalDashboardLoading && !personalDashboardLoaded ? '个人看板加载中...' : '当前用户暂无已结算个人对局数据'}
@@ -4029,7 +4026,9 @@ export default function App() {
           <div className="tab-scroll mt-3 space-y-2 pr-1 pb-2">
           {!visibleLeaderboard.length && (
             <div className="rounded-xl bg-white/80 px-3 py-2 text-sm text-slate-500">
-              {leaderboardLoading && !leaderboardLoaded ? '积分榜加载中...' : '暂无数据'}
+              {leaderboardLoadError ? (
+                <>积分榜加载失败。<button type="button" className="font-semibold text-blue-700 underline" onClick={() => loadLeaderboard({ force: true }).catch((err) => showNotice(err.message, 'error'))}>重试</button></>
+              ) : leaderboardLoading && !leaderboardLoaded ? '积分榜加载中...' : '暂无数据'}
             </div>
           )}
           {visibleLeaderboard.map((p) => {
