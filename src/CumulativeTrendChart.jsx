@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceDot, ReferenceLine, ResponsiveContainer, XAxis, YAxis } from 'recharts';
-import { buildCumulativeTrend, DEFAULT_TREND_MIN_SESSIONS, lastTrendIndex } from './utils/cumulativeTrend';
+import { buildCumulativeTrend, DEFAULT_TREND_MIN_SESSIONS, findTrendPoint } from './utils/cumulativeTrend';
 import './cumulativeTrendChart.css';
 
 const COLORS = [
@@ -11,9 +11,10 @@ const MOBILE_VIEW = '(max-width: 767px), (max-width: 1023px) and (pointer: coars
 const timeZone = 'Asia/Shanghai';
 const scores = new Intl.NumberFormat('zh-CN');
 const shortScores = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
-const days = new Intl.DateTimeFormat('zh-CN', { timeZone, year: '2-digit', month: 'numeric', day: 'numeric' });
-const hours = new Intl.DateTimeFormat('zh-CN', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const seconds = new Intl.DateTimeFormat('zh-CN', { timeZone, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+const dates = new Intl.DateTimeFormat('zh-CN', { timeZone, month: 'numeric', day: 'numeric' });
+const datedYears = new Intl.DateTimeFormat('zh-CN', { timeZone, year: '2-digit', month: 'numeric', day: 'numeric' });
+const years = new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric' });
+const hours = new Intl.DateTimeFormat('zh-CN', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const CHART_MARGIN = { top: 24, right: 12, bottom: 0, left: 5 };
 const TICK_STYLE = { fill: '#475569', fontSize: 11 };
 
@@ -40,10 +41,10 @@ function scoreTicks(series) {
 }
 
 export default function CumulativeTrendChart({ rows, loaded, loading, error, onRetry, formatDateTime }) {
-  const { series, times } = useMemo(() => buildCumulativeTrend(rows), [rows]);
+  const { series, sessions, sessionIndexes } = useMemo(() => buildCumulativeTrend(rows), [rows]);
   const [added, setAdded] = useState(() => new Set());
   const [hidden, setHidden] = useState(() => new Set());
-  const [selectedTime, setSelectedTime] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [width, setWidth] = useState(640);
   const [expanded, setExpanded] = useState(false);
   const sectionRef = useRef(null);
@@ -51,7 +52,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
   const dialogRef = useRef(null);
   const plotRef = useRef(null);
   const restoreFocusRef = useRef(false);
-  const chartAvailable = times.length > 0;
+  const chartAvailable = sessions.length > 0;
   const showLandscape = expanded && chartAvailable;
 
   useLayoutEffect(() => {
@@ -81,63 +82,65 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
   const ticks = useMemo(() => scoreTicks(enrolled), [enrolled]);
   const min = ticks[0];
   const max = ticks.at(-1);
-  const start = times[0];
-  const end = times.at(-1);
-  const duration = end - start;
+  const lastIndex = sessions.length - 1;
+  const firstSession = sessions[0];
+  const lastSession = sessions[lastIndex];
   const formatTick = showLandscape || width < 540 ? formatShortScore : scores.format;
   const axisWidth = Math.max(...ticks.map((tick) => formatTick(tick).length)) * 7 + 6;
   const plotLeft = CHART_MARGIN.left + axisWidth;
-  const count = width >= 540 ? 5 : width - plotLeft >= 225 ? 3 : 2;
-  const timeTicks = duration
-    ? Array.from({ length: count }, (_, i) => start + (duration * i) / (count - 1))
-    : [start];
-  const timeFormat = duration < 60_000 ? seconds : duration < 172_800_000 ? hours : days;
+  const labelCapacity = Math.max(2, Math.floor((width - plotLeft - CHART_MARGIN.right) / 58) + 1);
+  const count = Math.min(sessions.length, labelCapacity);
+  const sessionTicks = count > 1
+    ? Array.from({ length: count }, (_, i) => Math.round((lastIndex * i) / (count - 1)))
+    : [0];
+  let timeFormat = dates;
+  if (chartAvailable) {
+    if (years.format(firstSession.time) !== years.format(lastSession.time)) timeFormat = datedYears;
+    else if (dates.format(firstSession.time) === dates.format(lastSession.time) && count > 1) timeFormat = hours;
+  }
   const visible = enrolled.filter(({ playerId }) => !hidden.has(playerId));
-  const cursorIndex = selectedTime == null ? -1 : lastTrendIndex(times, selectedTime, (time) => time);
-  const cursor = times[cursorIndex];
-  const readoutTime = cursor ?? end;
+  const cursorIndex = sessionIndexes.get(selectedSessionId);
+  const cursor = sessions[cursorIndex];
+  const activePoints = cursor
+    ? new Map(visible.map(({ playerId, points }) => [playerId, findTrendPoint(points, cursorIndex)]))
+    : null;
 
-  function selectTime(event) {
+  function selectSession(event) {
     const bounds = event.currentTarget.getBoundingClientRect();
     const rotated = expanded && window.matchMedia('(orientation: portrait)').matches;
     const offset = rotated ? event.clientY - bounds.top : event.clientX - bounds.left;
     const plotWidth = Math.max(1, event.currentTarget.clientWidth - plotLeft - CHART_MARGIN.right);
     const ratio = Math.max(0, Math.min(1, (offset - plotLeft) / plotWidth));
-    const time = start + ratio * duration;
-    const index = lastTrendIndex(times, time, (value) => value);
-    const next = times[index + 1];
-    const previous = times[index];
-    setSelectedTime(next != null && next - time < time - previous ? next : previous);
+    setSelectedSessionId(sessions[Math.round(ratio * lastIndex)].sessionId);
   }
 
   function openChart() {
-    setSelectedTime(null);
+    setSelectedSessionId(null);
     sectionHeightRef.current = sectionRef.current?.offsetHeight ?? 0;
     restoreFocusRef.current = true;
     setExpanded(true);
   }
 
   function closeChart() {
-    setSelectedTime(null);
+    setSelectedSessionId(null);
     setExpanded(false);
   }
 
   function handlePlotClick(event) {
     if (!expanded && window.matchMedia(MOBILE_VIEW).matches) openChart();
-    else selectTime(event);
+    else selectSession(event);
   }
 
   function handleKeyDown(event) {
     if (event.key === 'Escape' && !expanded) {
-      setSelectedTime(null);
+      setSelectedSessionId(null);
     } else if ((event.key === 'Enter' || event.key === ' ') && !expanded && window.matchMedia(MOBILE_VIEW).matches) {
       event.preventDefault();
       openChart();
     } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault();
-      const current = cursorIndex < 0 ? times.length - 1 : cursorIndex;
-      const next = current + (event.key === 'ArrowLeft' ? -1 : 1);
-      setSelectedTime(times[Math.min(times.length - 1, Math.max(0, next))]);
+      const next = (cursorIndex ?? lastIndex) + (event.key === 'ArrowLeft' ? -1 : 1);
+      setSelectedSessionId(sessions[Math.min(lastIndex, Math.max(0, next))].sessionId);
     }
   }
 
@@ -186,23 +189,27 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
         </p>
       )}
       {chartAvailable && (
-        <>
+        <div
+          className={showLandscape ? 'flex min-h-0 flex-1 flex-col' : undefined}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setSelectedSessionId(null);
+          }}
+          onPointerLeave={(event) => { if (event.pointerType !== 'touch') setSelectedSessionId(null); }}
+        >
           <div className={`mt-2 flex flex-col rounded-2xl border border-slate-100 bg-white/70 px-1 pb-1 sm:px-2 ${showLandscape ? 'min-h-0 flex-1' : ''}`}>
             <div
               ref={plotRef}
               role="group"
               className={`relative w-full cursor-crosshair rounded-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500 ${showLandscape ? 'min-h-0 flex-1 touch-none' : 'h-[208px] touch-pan-y'}`}
-              aria-label="累计积分趋势，时间为北京时间。手机端可点按展开横屏。使用左右方向键查看不同时间的积分"
+              aria-label="累计积分趋势，时间为北京时间。手机端可点按展开横屏。使用左右方向键切换对局"
               tabIndex={0}
               onKeyDown={handleKeyDown}
-              onBlur={() => setSelectedTime(null)}
-              onPointerMove={(event) => { if (event.pointerType !== 'touch') selectTime(event); }}
-              onPointerLeave={(event) => { if (event.pointerType !== 'touch') setSelectedTime(null); }}
+              onPointerMove={(event) => { if (event.pointerType !== 'touch') selectSession(event); }}
               onClick={handlePlotClick}
             >
-              {cursor != null && (
+              {cursor && (
                 <span className="pointer-events-none absolute right-3 top-0.5 z-10 text-[11px] font-medium text-slate-600">
-                  {formatDateTime(cursor)}
+                  {formatDateTime(cursor.time)}
                 </span>
               )}
               {cursor == null && !showLandscape && (
@@ -212,12 +219,12 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                 <LineChart margin={CHART_MARGIN} accessibilityLayer={false}>
                   <CartesianGrid stroke="#e2e8f0" syncWithTicks />
                   <XAxis
-                    dataKey="time"
+                    dataKey="sessionIndex"
                     type="number"
                     scale="linear"
-                    domain={duration ? [start, end] : [start - 1, end + 1]}
+                    domain={lastIndex > 0 ? [0, lastIndex] : [-1, 1]}
                     niceTicks="none"
-                    ticks={timeTicks}
+                    ticks={sessionTicks}
                     interval={0}
                     height={24}
                     axisLine={false}
@@ -226,10 +233,10 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                       <text
                         x={x}
                         y={y + 3}
-                        textAnchor={!duration ? 'middle' : index === 0 ? 'start' : index === count - 1 ? 'end' : 'middle'}
+                        textAnchor={count === 1 ? 'middle' : index === 0 ? 'start' : index === count - 1 ? 'end' : 'middle'}
                         {...TICK_STYLE}
                       >
-                        {duration ? timeFormat.format(payload.value) : formatDateTime(payload.value)}
+                        {timeFormat.format(sessions[payload.value].time)}
                       </text>
                     )}
                   />
@@ -261,24 +268,19 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                       isAnimationActive={false}
                     />
                   ))}
-                  {cursor != null && <ReferenceLine x={cursor} stroke="#64748b" strokeDasharray="4 3" />}
+                  {cursor && <ReferenceLine x={cursorIndex} stroke="#64748b" strokeDasharray="4 3" />}
                   {visible.map(({ playerId, color, points }) => {
-                    const lastPoint = points.at(-1);
+                    const point = activePoints ? activePoints.get(playerId) : points.at(-1);
+                    if (!point) return null;
                     return (
                       <ReferenceDot
                         key={playerId}
-                        x={lastPoint.time}
-                        y={lastPoint.score}
-                        r={2.5}
+                        x={point.sessionIndex}
+                        y={point.score}
+                        r={cursor ? 3.25 : 2.5}
                         fill={color}
-                        stroke="none"
+                        stroke={cursor ? 'white' : 'none'}
                       />
-                    );
-                  })}
-                  {cursor != null && visible.map(({ playerId, color, points }) => {
-                    const point = points[lastTrendIndex(points, cursor, (item) => item.time)];
-                    return point?.time === cursor && (
-                      <ReferenceDot key={playerId} x={point.time} y={point.score} r={3.25} fill={color} stroke="white" />
                     );
                   })}
                 </LineChart>
@@ -298,7 +300,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
             >
               {enrolled.map(({ playerId, name, sessionCount, color, points }) => {
                 const shown = !hidden.has(playerId);
-                const point = points[lastTrendIndex(points, readoutTime, (item) => item.time)];
+                const point = activePoints ? activePoints.get(playerId) : points.at(-1);
                 return (
                   <button
                     key={playerId}
@@ -319,9 +321,9 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                       style={{ borderColor: shown ? color : '#94a3b8' }}
                     />
                     <span className="truncate">{name}</span>
-                    {shown && (
+                    {shown && point && (
                       <span className={`shrink-0 font-semibold tabular-nums ${point?.score > 0 ? 'text-emerald-600' : point?.score < 0 ? 'text-rose-600' : 'text-slate-500'}`}>
-                        {point ? scores.format(point.score) : '—'}
+                        {scores.format(point.score)}
                       </span>
                     )}
                   </button>
@@ -329,7 +331,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
               })}
             </div>
           )}
-        </>
+        </div>
       )}
     </>
   );
