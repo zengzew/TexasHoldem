@@ -17,7 +17,8 @@ const years = new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric' });
 const hours = new Intl.DateTimeFormat('zh-CN', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const CHART_MARGIN = { top: 24, right: 12, bottom: 0, left: 5 };
 const TICK_STYLE = { fill: '#475569', fontSize: 11 };
-const PREFERRED_AXIS_MIN = -75_000;
+const SCORE_TICK_STEP = 20_000;
+const TREND_ORIGIN = { sessionIndex: -1, score: 0 };
 
 function formatShortScore(score) {
   return shortScores.format(score).replace('-', '−').replace('K', 'k');
@@ -32,17 +33,10 @@ function scoreTicks(series) {
       max = Math.max(max, score);
     }
   }
-  if (min === max) return [-1, 0, 1];
-  const rough = (max - min) / 4;
-  const power = 10 ** Math.floor(Math.log10(rough));
-  const step = Math.max(1, [1, 2, 5, 10].find((n) => n * power >= rough) * power);
-  const first = Math.floor(min / step);
-  const last = Math.ceil(max / step);
-  const ticks = Array.from({ length: last - first + 1 }, (_, i) => (first + i) * step);
-  if (min >= PREFERRED_AXIS_MIN && ticks[0] < PREFERRED_AXIS_MIN) {
-    return [PREFERRED_AXIS_MIN, ...ticks.filter((tick) => tick > PREFERRED_AXIS_MIN)];
-  }
-  return ticks;
+  if (min === max) return [-SCORE_TICK_STEP, 0, SCORE_TICK_STEP];
+  const first = Math.floor(min / SCORE_TICK_STEP);
+  const last = Math.ceil(max / SCORE_TICK_STEP);
+  return Array.from({ length: last - first + 1 }, (_, i) => (first + i) * SCORE_TICK_STEP);
 }
 
 export default function CumulativeTrendChart({ rows, loaded, loading, error, onRetry, formatDateTime }) {
@@ -104,6 +98,14 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
     else if (dates.format(firstSession.time) === dates.format(lastSession.time) && count > 1) timeFormat = hours;
   }
   const visible = enrolled.filter(({ playerId }) => !hidden.has(playerId));
+  const plotPointsByPlayer = useMemo(() => new Map(enrolled.map(({ playerId, points }) => {
+    const firstSessionIndex = points[0].sessionIndex;
+    const plotPoints = [TREND_ORIGIN];
+    if (firstSessionIndex > 0) {
+      plotPoints.push({ sessionIndex: firstSessionIndex - 1, score: 0 });
+    }
+    return [playerId, plotPoints.concat(points)];
+  })), [enrolled]);
   const allSelected = visible.length === enrolled.length;
   const togglePlayersLabel = allSelected ? '全不选' : '全选';
   const cursorIndex = sessionIndexes.get(selectedSessionId);
@@ -117,7 +119,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
   }).sort((a, b) => b.score - a.score) : [];
   const tooltipWidth = Math.min(208, Math.max(0, width - 8));
   const cursorX = plotLeft + (width - plotLeft - CHART_MARGIN.right)
-    * (lastIndex > 0 ? cursorIndex / lastIndex : 0.5);
+    * ((cursorIndex + 1) / sessions.length);
   const tooltipLeft = cursorX + tooltipWidth + 12 <= width
     ? cursorX + 8
     : Math.max(4, cursorX - tooltipWidth - 8);
@@ -128,7 +130,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
     const offset = rotated ? event.clientY - bounds.top : event.clientX - bounds.left;
     const plotWidth = Math.max(1, event.currentTarget.clientWidth - plotLeft - CHART_MARGIN.right);
     const ratio = Math.max(0, Math.min(1, (offset - plotLeft) / plotWidth));
-    setSelectedSessionId(sessions[Math.round(ratio * lastIndex)].sessionId);
+    setSelectedSessionId(sessions[Math.round(ratio * sessions.length) - 1]?.sessionId ?? null);
   }
 
   function openChart() {
@@ -280,7 +282,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                     dataKey="sessionIndex"
                     type="number"
                     scale="linear"
-                    domain={lastIndex > 0 ? [0, lastIndex] : [-1, 1]}
+                    domain={[TREND_ORIGIN.sessionIndex, lastIndex]}
                     niceTicks="none"
                     ticks={sessionTicks}
                     interval={0}
@@ -291,7 +293,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                       <text
                         x={x}
                         y={y + 3}
-                        textAnchor={count === 1 ? 'middle' : index === 0 ? 'start' : index === count - 1 ? 'end' : 'middle'}
+                        textAnchor={index === count - 1 ? 'end' : index === 0 ? 'start' : 'middle'}
                         {...TICK_STYLE}
                       >
                         {timeFormat.format(sessions[payload.value].time)}
@@ -311,11 +313,11 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                     tickFormatter={formatTick}
                   />
                   <ReferenceLine y={0} stroke="#94a3b8" />
-                  {visible.map(({ playerId, name, color, points }) => (
+                  {visible.map(({ playerId, name, color }) => (
                     <Line
                       key={playerId}
                       name={name}
-                      data={points}
+                      data={plotPointsByPlayer.get(playerId)}
                       dataKey="score"
                       type="linear"
                       stroke={color}
