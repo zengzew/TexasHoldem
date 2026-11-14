@@ -22,6 +22,7 @@
 }
 
 .trend-landscape-content {
+  container-type: size;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -30,7 +31,23 @@
     max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
 }
 
+.trend-inline-players,
+.trend-landscape-players {
+  max-height: 7.75rem;
+  overflow-y: auto;
+}
+
+@container (max-height: 400px) {
+  .trend-landscape-players {
+    max-height: 5.125rem;
+  }
+}
+
 @media (orientation: portrait) {
+  .trend-inline-players {
+    max-height: none;
+  }
+
   .trend-landscape-content {
     width: 100vh;
     width: 100dvh;

@@ -99,6 +99,8 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
     else if (dates.format(firstSession.time) === dates.format(lastSession.time) && count > 1) timeFormat = hours;
   }
   const visible = enrolled.filter(({ playerId }) => !hidden.has(playerId));
+  const allSelected = visible.length === enrolled.length;
+  const togglePlayersLabel = allSelected ? '全不选' : '全选';
   const cursorIndex = sessionIndexes.get(selectedSessionId);
   const cursor = sessions[cursorIndex];
   const activePoints = cursor
@@ -169,6 +171,26 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
               className="btn-secondary room-switch-btn order-last h-11 w-11 rounded-full p-0 text-xl"
               onClick={closeChart}
             >×</button>
+          )}
+          {enrolled.length > 0 && (
+            <button
+              type="button"
+              aria-label={togglePlayersLabel}
+              title={togglePlayersLabel}
+              className="btn-secondary room-switch-btn inline-flex h-11 w-11 items-center justify-center rounded-full p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500"
+              onClick={() => setHidden(allSelected ? new Set(enrolled.map(({ playerId }) => playerId)) : new Set())}
+            >
+              <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                {allSelected ? (
+                  <path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M6.5 6.5A12.1 12.1 0 0 0 2 12s3.6 6 10 6a10.8 10.8 0 0 0 5.5-1.5M10 6.2a10 10 0 0 1 2-.2c6.4 0 10 6 10 6a14 14 0 0 1-2.2 2.7" />
+                ) : (
+                  <>
+                    <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z" />
+                    <circle cx="12" cy="12" r="2" />
+                  </>
+                )}
+              </svg>
+            </button>
           )}
           {available.length > 0 && (
             <select
@@ -328,7 +350,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
             <div
               role="group"
               aria-label="玩家图例"
-              className={`tab-scroll mt-2 flex shrink-0 gap-1.5 p-0.5 ${showLandscape ? 'overflow-x-auto' : 'max-h-36 flex-wrap overflow-y-auto'}`}
+              className={`tab-scroll mt-2 flex shrink-0 flex-wrap content-start gap-1.5 p-0.5 ${showLandscape ? 'trend-landscape-players' : 'trend-inline-players'}`}
             >
               {enrolled.map(({ playerId, name, sessionCount, color, points }) => {
                 const shown = !hidden.has(playerId);
