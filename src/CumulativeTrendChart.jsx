@@ -4,10 +4,9 @@ import { buildCumulativeTrend, DEFAULT_TREND_MIN_SESSIONS, lastTrendIndex } from
 import './cumulativeTrendChart.css';
 
 const COLORS = [
-  '#3B72AF', '#238676', '#BC692C', '#8056AE', '#B25279',
-  '#657C34', '#2D859C', '#A9544D', '#57667D', '#92742D',
+  '#2864BD', '#008476', '#C66718', '#7F4BB5', '#BD3F79',
+  '#5F7C21', '#0093B0', '#CE4945', '#3D516E', '#9E7914',
 ];
-const DASHES = [undefined, '7 3', '2 3', '8 3 2 3'];
 const MOBILE_VIEW = '(max-width: 767px), (max-width: 1023px) and (pointer: coarse)';
 const timeZone = 'Asia/Shanghai';
 const scores = new Intl.NumberFormat('zh-CN');
@@ -76,7 +75,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
 
   const enrolled = useMemo(() => series.flatMap((player, index) =>
     player.sessionCount >= DEFAULT_TREND_MIN_SESSIONS || added.has(player.playerId)
-      ? [{ ...player, color: COLORS[index % COLORS.length], dash: DASHES[(index + Math.floor(index / COLORS.length)) % DASHES.length] }]
+      ? [{ ...player, color: COLORS[index % COLORS.length] }]
       : []
   ), [series, added]);
   const ticks = useMemo(() => scoreTicks(enrolled), [enrolled]);
@@ -149,6 +148,15 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
       <div className="flex shrink-0 items-center justify-between gap-2">
         <h3 id="cumulative-trend-title" className="text-base font-semibold text-slate-900">全局累计积分趋势</h3>
         <div className="flex shrink-0 items-center gap-2">
+          {/* The dialog focuses the first control. Keep the native player picker out of that position. */}
+          {showLandscape && (
+            <button
+              type="button"
+              aria-label="关闭横屏图表"
+              className="btn-secondary room-switch-btn order-last h-11 w-11 rounded-full p-0 text-xl"
+              onClick={closeChart}
+            >×</button>
+          )}
           {available.length > 0 && (
             <select
               aria-label="添加玩家"
@@ -163,14 +171,6 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
               <option value="" disabled>+</option>
               {available.map(({ playerId, name, sessionCount }) => <option key={playerId} value={playerId}>{name}（{sessionCount} 局）</option>)}
             </select>
-          )}
-          {showLandscape && (
-            <button
-              type="button"
-              aria-label="关闭横屏图表"
-              className="btn-secondary room-switch-btn h-11 w-11 rounded-full p-0 text-xl"
-              onClick={closeChart}
-            >×</button>
           )}
         </div>
       </div>
@@ -246,7 +246,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                     tickFormatter={formatTick}
                   />
                   <ReferenceLine y={0} stroke="#94a3b8" />
-                  {visible.map(({ playerId, name, color, dash, points }) => (
+                  {visible.map(({ playerId, name, color, points }) => (
                     <Line
                       key={playerId}
                       name={name}
@@ -255,7 +255,6 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                       type="linear"
                       stroke={color}
                       strokeWidth={2}
-                      strokeDasharray={dash}
                       strokeLinejoin="round"
                       strokeLinecap="round"
                       dot={false}
@@ -297,7 +296,7 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
               aria-label="玩家图例"
               className={`tab-scroll mt-2 flex shrink-0 gap-1.5 p-0.5 ${showLandscape ? 'overflow-x-auto' : 'max-h-36 flex-wrap overflow-y-auto'}`}
             >
-              {enrolled.map(({ playerId, name, sessionCount, color, dash, points }) => {
+              {enrolled.map(({ playerId, name, sessionCount, color, points }) => {
                 const shown = !hidden.has(playerId);
                 const point = points[lastTrendIndex(points, readoutTime, (item) => item.time)];
                 return (
@@ -316,8 +315,8 @@ export default function CumulativeTrendChart({ rows, loaded, loading, error, onR
                     })}
                   >
                     <span
-                      className="w-4 shrink-0 border-t-2"
-                      style={{ borderColor: shown ? color : '#94a3b8', borderTopStyle: dash === '2 3' ? 'dotted' : dash ? 'dashed' : 'solid' }}
+                      className="w-4 shrink-0 border-t-2 border-solid"
+                      style={{ borderColor: shown ? color : '#94a3b8' }}
                     />
                     <span className="truncate">{name}</span>
                     {shown && (
